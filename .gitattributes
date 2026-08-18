@@ -1,0 +1,7 @@
+# The builders write CSVs with an explicit lineterminator="\n", and read_grid
+# compares forked grids against the baseline. Let git rewrite line endings on
+# checkout and every generated file would come back CRLF, diff dirty against a
+# fresh build, and churn on every run. Keep LF end to end.
+* text=auto eol=lf
+
+*.parquet binary

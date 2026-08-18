@@ -1,0 +1,22 @@
+# PM-Mike — direct dependencies
+# Install:  uv pip install -r requirements.txt
+# Run:      .venv\Scripts\python.exe script.py
+
+# --- agentic core ---
+anthropic==0.121.0
+mcp==2.0.0
+python-dotenv==1.2.2
+
+# --- data core ---
+pandas==3.0.5
+numpy==2.5.2
+
+# --- dev tooling ---
+ruff==0.16.2
+pytest==9.1.1
+
+# --- market data (pending) ---
+# FiinQuantX is NOT on PyPI — ships from FiinGroup's private index and needs
+# credentials. Install separately once the index URL is available:
+#   uv pip install fiinquantx --index-url <fiin-index-url>
+# The FiinQuant MCP server works without this local package.

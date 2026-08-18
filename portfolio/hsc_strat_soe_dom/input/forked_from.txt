@@ -1,0 +1,3 @@
+forked_from: portfolio/baseline/sector_constituents.csv
+anchor_date: 2026-08-12
+forked_at:   2026-08-14 16:12

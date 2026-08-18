@@ -1,0 +1,14 @@
+# Universe definition — the only hand-editable file in the pipeline.
+# Everything else is generated. Edit this, then run /eod <date>.
+#
+# index : resolved via get_index_constituents at run time.
+#         NOTE: that API has no as-of-date parameter, so it always returns
+#         CURRENT membership. Resolved members are snapshotted into the
+#         parquet on every run; that snapshot is the only historical record.
+# picks : arbitrary tickers, any exchange, need not be in the index.
+
+index: VN100
+
+picks:
+  - MSR   # Masan High-Tech Materials, UPCoM
+  - F88   # Dau tu F88, UPCoM

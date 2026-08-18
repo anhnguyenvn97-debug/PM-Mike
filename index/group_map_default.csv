@@ -1,0 +1,101 @@
+Ticker,Company_name,ICB L2 sector,Exclusive group
+VCB,Vietcombank,Banks,Banks - State
+CTG,VietinBank,Banks,Banks - State
+MBB,MBBank,Banks,Banks - State
+VPB,VPBank,Banks,Banks - Private
+TCB,Techcombank,Banks,Banks - Private
+HDB,HDBank,Banks,Banks - Private
+ACB,Asia Commercial Bank,Banks,Banks - Private
+STB,Sacombank,Banks,Banks - Private
+LPB,LPBank,Banks,Banks - Private
+SHB,SHB,Banks,Banks - Private
+VIB,VIBBank,Banks,Banks - Private
+EIB,Eximbank,Banks,Banks - Private
+SSB,SeABank,Banks,Banks - Private
+MSB,MSB Bank,Banks,Banks - Private
+TPB,TPBank,Banks,Banks - Private
+NAB,Nam A Bank,Banks,Banks - Private
+OCB,OCB Bank,Banks,Banks - Private
+VIC,VinGroup,Real Estate,Real Estate - Residential
+VHM,Vinhomes,Real Estate,Real Estate - Residential
+KDH,Khang Dien House,Real Estate,Real Estate - Residential
+NVL,Novaland,Real Estate,Real Estate - Residential
+DXG,Bluemarq Group,Real Estate,Real Estate - Residential
+DIG,DIC Corp,Real Estate,Real Estate - Residential
+NLG,Nam Long Investment,Real Estate,Real Estate - Residential
+PDR,Phat Dat Real Estate,Real Estate,Real Estate - Residential
+VPI,Van Phu - Invest,Real Estate,Real Estate - Residential
+HDG,HA DO Construction,Real Estate,Real Estate - Residential
+SJS,SJ Group,Real Estate,Real Estate - Residential
+HDC,Ba Ria - Vung Tau House Development,Real Estate,Real Estate - Residential
+KOS,KOSY Company,Real Estate,Real Estate - Residential
+KBC,Kinh Bac Urban Development,Real Estate,Real Estate - Industrial
+SIP,SVGR CORP,Real Estate,Real Estate - Industrial
+SZC,Sonadezi Chau Duc,Real Estate,Real Estate - Industrial
+VRE,Vincom Retail,Real Estate,Real Estate - Commercial
+TCH,Hoang Huy Investment Financial Services,Real Estate,Real Estate - Commercial
+DXS,Dat Xanh Real Estate Services,Real Estate,Real Estate - Commercial
+SSI,SSI Securities,Financial Services,Financial Services
+VIX,VIX Securities,Financial Services,Financial Services
+VND,VNDIRECT,Financial Services,Financial Services
+VCI,Vietcap Securities,Financial Services,Financial Services
+HCM,HSC Securities,Financial Services,Financial Services
+FTS,FPT Securities,Financial Services,Financial Services
+DSE,DNSE Securities,Financial Services,Financial Services
+CTS,Vietinbank Securities,Financial Services,Financial Services
+BSI,BIDV Securities,Financial Services,Financial Services
+EVF,EVN General Finance,Financial Services,Financial Services
+GMD,Gemadept Group,Industrial Goods & Services,Logistics
+VSC,Vietnam Container Shipping,Industrial Goods & Services,Logistics
+VTP,Viettel Post,Industrial Goods & Services,Logistics
+PVT,PVTrans,Industrial Goods & Services,Logistics
+GEX,Gelex Group JSC,Industrial Goods & Services,Industrial
+GEE,GELEX Electricity,Industrial Goods & Services,Industrial
+CII,Ho Chi Minh Infrastructure,Construction & Materials,Construction Contractors
+VCG,Vinaconex Group,Construction & Materials,Construction Contractors
+PC1,PC1 Group,Construction & Materials,Construction Contractors
+HHV,Deo Ca Traffic Infrastructure Investment,Construction & Materials,Construction Contractors
+CTR,Viettel Construction,Construction & Materials,Construction Contractors
+CTD,COTECCONS construction,Construction & Materials,Construction Contractors
+BMP,Binh Minh Plastics,Construction & Materials,Building Materials
+VGC,Viglacera Corporation,Construction & Materials,Building Materials
+HT1,VICEM Ha Tien,Construction & Materials,Building Materials
+MWG,Mobile World Investment,Retail,Consumer Retail
+FRT,FPT Retail,Retail,Consumer Retail
+DGW,Digiworld Corp.,Retail,Consumer Retail
+PNJ,Phu Nhuan Jewelry,Personal & Household Goods,Consumer Retail
+BID,BIDV,Banks,Banks - State
+BCM,Becamex Group,Real Estate,Real Estate - Industrial
+HPG,Hoa Phat Group,Basic Resources,Steel
+HSG,Hoa Sen Group,Basic Resources,Steel
+NKG,Nam Kim Steel,Basic Resources,Steel
+DPM,Petrovietnam Fertilizer and Chemicals,Chemicals,Chemicals
+DCM,PetroVietnam Camau Fertilizer,Chemicals,Chemicals
+PHR,Phuoc Hoa rubber,Chemicals,Chemicals
+GVR,Viet Nam Rubber Group,Chemicals,Chemicals
+MSN,Masan Group,Food & Beverage,Food - Staples & Beverage
+VNM,Vinamilk,Food & Beverage,Food - Staples & Beverage
+SAB,SABECO,Food & Beverage,Food - Staples & Beverage
+KDC,KIDO Group,Food & Beverage,Food - Staples & Beverage
+HAG,HAGL Joint Stock Company,Food & Beverage,Food - Agriculture
+DBC,DABACO,Food & Beverage,Food - Agriculture
+BAF,BAF Vietnam Agriculture,Food & Beverage,Food - Agriculture
+VHC,Vinh Hoan Corp.,Food & Beverage,Food - Agriculture
+ANV,Nam Viet,Food & Beverage,Food - Agriculture
+PAN,The PAN Group,Food & Beverage,Food - Agriculture
+SBT,Thanh Thanh Cong - Bien Hoa Sugar,Food & Beverage,Food - Agriculture
+IMP,Imexpharm Corporation,Health Care,Health Care
+BVH,Bao Viet Group,Insurance,Insurance
+PVD,PetroVietNam Drilling & Well,Oil & Gas,Oil & Gas
+BSR,PetroVietnam Refining and Petrochemical,Oil & Gas,Oil & Gas
+PLX,Petrolimex,Oil & Gas,Oil & Gas
+FPT,FPT Corp,Technology,Technology
+CMG,CMC Corporation,Technology,Technology
+VJC,Vietjet Air,Travel & Leisure,Travel & Leisure
+VPL,Vinpearl,Travel & Leisure,Travel & Leisure
+SCS,Saigon Cargo Service,Travel & Leisure,Travel & Leisure
+REE,Refrigeration Electrical Engineering,Utilities,Utilities
+POW,PV Power,Utilities,Utilities
+NT2,Nhon Trach 2 Power,Utilities,Utilities
+BWE,Binh Duong Water Environment,Utilities,Utilities
+GAS,PetroVietnam Gas,Utilities,Utilities
