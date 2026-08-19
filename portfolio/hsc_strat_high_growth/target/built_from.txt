@@ -1,4 +1,5 @@
 book:        portfolio/hsc_strat_high_growth/sector_constituents_custom.csv
 anchor_date: 2026-08-12
 sector_cap:  off
-built_at:    2026-08-18 13:11
+tactical:    off
+built_at:    2026-08-19 10:14
