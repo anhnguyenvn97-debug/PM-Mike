@@ -443,7 +443,7 @@ def main() -> int:
                     help="output folder (default portfolio/<name>/backtest)")
     a = ap.parse_args()
     if not a.db.exists():
-        print(f"FAIL  missing {a.db}; run data/load_history.py first")
+        print(f"FAIL  missing {a.db}; run scr/load_history.py first")
         return 1
 
     try:

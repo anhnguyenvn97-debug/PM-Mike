@@ -47,7 +47,7 @@ stamp means the session was still open and the row is provisional, not a close.
 ## 4. Load
 
 ```
-.venv\Scripts\python.exe data\load_eod.py $1
+.venv\Scripts\python.exe scr\load_eod.py $1
 ```
 
 The loader validates and owns the parquet write. It is idempotent: re-running a

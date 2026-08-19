@@ -21,8 +21,8 @@ database.
 Every run rewrites data/local_history.txt with the schema and current state.
 
 Usage:
-    .venv\\Scripts\\python.exe data\\load_history.py            # all drops
-    .venv\\Scripts\\python.exe data\\load_history.py f.xlsx     # one file
+    .venv\\Scripts\\python.exe scr\\load_history.py            # all drops
+    .venv\\Scripts\\python.exe scr\\load_history.py f.xlsx     # one file
 """
 import hashlib
 import sys
@@ -31,11 +31,12 @@ from pathlib import Path
 import duckdb
 import pandas as pd
 
-ROOT = Path(__file__).resolve().parent
-DROP = ROOT / "fiinpro"
-DB = ROOT / "local_history.db"
-TMP = ROOT / "local_history.db.building"
-DICT = ROOT / "local_history.txt"
+ROOT = Path(__file__).resolve().parent.parent
+DATA = ROOT / "data"
+DROP = DATA / "fiinpro"
+DB = DATA / "local_history.db"
+TMP = DATA / "local_history.db.building"
+DICT = DATA / "local_history.txt"
 
 # FiinPro export header -> schema. Headers carry a "\nUnit: ..." suffix that is
 # stripped before lookup. "No" is a row ordinal and is dropped.
@@ -172,7 +173,7 @@ def write_dictionary(con: duckdb.DuckDBPyConnection) -> None:
     """Rewrite local_history.txt from the live database state."""
     now = pd.Timestamp.now().floor("s")
     L = ["local_history.db - data dictionary",
-         f"generated {now} by data/load_history.py (do not edit)",
+         f"generated {now} by scr/load_history.py (do not edit)",
          f"size {DB.stat().st_size / 1e6:.1f} MB",
          ""]
 

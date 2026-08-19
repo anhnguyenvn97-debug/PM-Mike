@@ -5,15 +5,16 @@ raw CSV; this script owns every write to the parquet. It derives nothing that
 the provider already returned -- it only validates and appends.
 
 Usage:
-    .venv\\Scripts\\python.exe data\\load_eod.py 2026-08-12
+    .venv\\Scripts\\python.exe scr\\load_eod.py 2026-08-12
 """
 import sys
 from pathlib import Path
 
 import pandas as pd
 
-ROOT = Path(__file__).resolve().parent
-PARQUET = ROOT / "eod.parquet"
+ROOT = Path(__file__).resolve().parent.parent
+DATA = ROOT / "data"
+PARQUET = DATA / "eod.parquet"
 
 VALID_EXCHANGES = {"HOSE", "HNX", "UPCOM"}
 NUMERIC = [
@@ -83,7 +84,7 @@ def validate(df: pd.DataFrame, trade_date: str) -> list[str]:
 
 
 def main(trade_date: str) -> int:
-    src = ROOT / "raw" / f"{trade_date}.csv"
+    src = DATA / "raw" / f"{trade_date}.csv"
     if not src.exists():
         print(f"FAIL  no raw file: {src}")
         return 1

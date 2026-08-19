@@ -1,5 +1,5 @@
 local_history.db - data dictionary
-generated 2026-08-19 14:47:43 by data/load_history.py (do not edit)
+generated 2026-08-19 16:29:38 by scr/load_history.py (do not edit)
 size 6.0 MB
 
 STATE
@@ -57,8 +57,8 @@ QUALITY  market_cap vs official_close * outstanding_shares
   MCH      240 rows  worst    44.7%
   F88      204 rows  worst    96.2%
   TAL      135 rows  worst    33.3%
+  NVL        3 rows  worst     9.0%
   MWG        3 rows  worst     0.5%
-  SHB        3 rows  worst     4.0%
 
 NOT STORED
   exchange  derived in prices_v; never joined from a snapshot
