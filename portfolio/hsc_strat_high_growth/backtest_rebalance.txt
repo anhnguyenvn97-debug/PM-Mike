@@ -1,0 +1,154 @@
+backtest_rebalance.json - data dictionary
+hand-maintained; edit this alongside the .json when a key changes
+
+WHAT IT IS
+  The rebalancing discipline: how often target weights are recalculated, what
+  drift is tolerated between recalculations, and what a trade costs. It is a
+  property of the strategy, not of a backtest run -- the variant list and the
+  output folder stay CLI flags. The date range lives HERE (start/end), because
+  a strategy backtested over different windows is a different evidence base.
+
+  This copy belongs to portfolio/hsc_strat_high_growth/ and OVERRIDES the
+  default in portfolio/baseline/. Edits to the baseline copy do NOT propagate
+  here. A portfolio with no copy of its own inherits baseline's. It sits above
+  input/, so build_portfolio.py --fork can never clobber it -- same reason
+  sector_cap.json and tactical_group.json live where they do.
+
+KEYS
+
+  rebalance            yes | no
+                       "no" means buy-and-hold from inception and NOTHING else
+                       in this file is read. A missing file is the same as
+                       "no", matching how sector_cap.json already behaves.
+
+  calendar             monthly | quarterly
+                       Scheduled recalculation frequency.
+
+  on                   first_session
+                       Which session of the period the rebalance lands on.
+                       Resolved against sessions actually present in
+                       local_history.db, so short months need no special case.
+
+  start                dd-mm-yyyy | default
+  end                  dd-mm-yyyy | default
+                       Backtest window, inclusive, DAY-FIRST format. "default"
+                       resolves to the first / last session in
+                       local_history.db. A dated start snaps FORWARD to the
+                       first session on or after it; a dated end snaps BACK to
+                       the last session on or before it, so weekends and
+                       holidays need no special care.
+
+  anchor_on_rebalance  yes | no
+                       yes: baseline budgets b_g re-derived from that session's
+                            float cap. Ratings and multipliers are an overlay on
+                            a moving base.
+                       no:  target computed once at inception and frozen. Kept
+                            as a DIAGNOSTIC only -- it isolates how much of a
+                            book's return comes from the tilt versus from
+                            tracking a drifting float-cap base. Not a production
+                            setting: by 2026-07-01 a frozen target sits 25.1% of
+                            NAV away from the live float-cap target (20.4% at
+                            group level), can never hold the five names that
+                            listed mid-period (2.3% of the book), and ignores
+                            free-float changes in 85 of 102 tickers. It also
+                            makes drift_threshold meaningless, since the band
+                            would then maintain a stale target precisely.
+                       Neither setting moves the MEMBER LIST. local_history.db
+                       holds one frozen universe with no membership history, so
+                       every run is on current constituents held backwards.
+                       That survivorship bias is stamped into built_from.txt.
+
+  drift_band           yes | no
+                       Off-schedule trigger between calendar dates. "no" means
+                       calendar only and drift_grain/drift_threshold are unread.
+
+  drift_grain          group | name
+                       Level the drift is summed over. group uses the 21 sector
+                       budgets, name uses the 102 holdings. Name-level is always
+                       the larger of the two -- within-group dispersion cancels
+                       when summed to the group (median ratio 1.40, max 2.79 on
+                       2025-01-02..2026-08-18).
+                       group is correct here: within-group weights are float-cap
+                       arithmetic, not decisions. Stock selection is expressed by
+                       deleting names; after that the survivors' relative sizes
+                       are an artifact, and a name-grain band would trade to
+                       restore a relationship nobody chose. Every other rule in
+                       the repo -- ratings, multipliers, sector cap, tactical
+                       overlay -- operates at the group grain.
+
+  drift_threshold      fraction, not percent (0.05 = 5%)
+                       Fires when 0.5 * sum_g |w_g - t_g| exceeds it.
+                       The metric is one-way turnover-to-restore, so the
+                       threshold is denominated in what you pay rather than in
+                       an abstract distance. At group grain it UNDER-reads the
+                       actual trade: across sessions where group drift sat near
+                       5%, real name-level turnover to restore was a median
+                       6.13% (range 4.89-7.97%). rebalances.csv logs both -- the
+                       group drift that triggered the event, and the name-level
+                       turnover actually transacted.
+                       There is no drift_metric key: turnover-to-restore has no
+                       alternative worth switching to.
+
+  lag_sessions         integer, sessions between decision and fill
+                       1 = observe session t's close, compute targets, fill at
+                       t+1. 0 assumes you can trade the print you just measured.
+
+  execution_price      close_adj | open_adj
+                       Fill price. This DOMINATES the cost model: median
+                       |close_adj - open_adj| is 1.08% of close (p90 3.52%),
+                       larger than any plausible brokerage assumption. Must be
+                       identical across all variants in a sweep or the
+                       comparison is meaningless.
+
+  brokerage_bps        basis points per side. 10 = 0.10%.
+                       NOTE 1 bp = 0.01%; 10 bps = 0.10%. The two are not the
+                       same number.
+
+  sell_tax_bps         basis points on sell proceeds. 10 = 0.1%.
+                       Modelled separately from brokerage so summary.csv can
+                       show turnover cost and tax drag as distinct lines.
+
+  Annual cost = one-way turnover * (2 * brokerage_bps + sell_tax_bps) / 10000.
+
+BEHAVIOUR NOT EXPOSED AS CONFIG
+  - A band-triggered rebalance RESTORES the current target; it does not
+    re-anchor. Re-anchoring is a calendar event only.
+  - Restore is to full target, never trimmed to the band edge. Trim-to-edge
+    leaves the book sitting on the threshold where any further drift re-fires,
+    which is the design that needs a cooldown parameter. This one does not: at
+    threshold 0.05 the tightest gap between band triggers is 32 sessions and the
+    closest approach to a scheduled rebalance is 17.
+  - Late listings enter at the next scheduled rebalance after their first
+    session. Until then their group's existing names carry the weight; no cash
+    is held aside and no off-cycle trade is forced.
+  - A name with no price that session is held and corrected at the next
+    tradeable session. BSR and TAL are each missing 8 interior sessions, MCH 5.
+  - Float cap is always free_float * (market_cap / outstanding_shares), the
+    same basis as build_baseline.py. On rows where that identity disagrees with
+    close_raw -- load_history.py warns on roughly 1.5% of rows -- the derived
+    value is used anyway, for exact consistency with the live builder, and the
+    count is logged per rebalance date.
+
+WHY THESE DEFAULTS
+  Measured on the Default variant, 102 names, 403 sessions 2025-01-02 ->
+  2026-08-18, quarterly re-anchor, T+1 fill.
+
+  Aggregate group drift between quarterly rebalances, % of NAV:
+      median 3.16   p75 4.37   p90 5.90   p99 8.13   max 8.72
+
+  Drift does not spike and revert; it climbs early in the quarter and stays.
+  Any threshold at or below ~3% therefore sits inside the normal operating
+  range and turns the band into the schedule rather than an exception. 0.05
+  sits above p75.
+
+      threshold   scheduled   band   total   turnover/yr
+      off                 6      0       6         10.5%
+      0.02                6     22      28         69.5%
+      0.03                6     13      19         60.3%
+      0.04                6      5      11         39.0%
+      0.05                6      3       9         30.4%
+
+  At brokerage 10 bps/side plus 10 bps sell tax, cost = turnover * 30/10000:
+      band on  (30.4% turnover)   9.1 bps/yr
+      band off (10.5% turnover)   3.2 bps/yr
+  The whole band decision is worth roughly 6 bps a year.

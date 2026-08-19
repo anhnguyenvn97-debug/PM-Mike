@@ -1,0 +1,17 @@
+{
+  "rebalance": "yes",
+  "calendar": "quarterly",
+  "on": "first_session",
+  "start": "default",
+  "end": "default",
+  "anchor_on_rebalance": "yes",
+
+  "drift_band": "yes",
+  "drift_grain": "group",
+  "drift_threshold": 0.05,
+
+  "lag_sessions": 1,
+  "execution_price": "close_adj",
+  "brokerage_bps": 10,
+  "sell_tax_bps": 10
+}

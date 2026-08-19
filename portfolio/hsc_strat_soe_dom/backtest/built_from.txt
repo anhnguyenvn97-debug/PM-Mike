@@ -1,0 +1,18 @@
+db:          C:\Users\anh.nn\PM-Mike\data\local_history.db
+    Vn100 plus 1.xlsx  5a749daa6653e0cc6b169491d35fb18eaa6aca57f6ad42f18f0bc581050c820a
+    Vn100 plus 2.xlsx  3d9ac982e386819e152c1d1cf8fc1c3a7e55c198074befbf80a831deedf069b6
+    Vn100 plus.xlsx  2dc854bf4aa716d8f6ef98f2f939886778e10d58915d02f758e344a9594cb377
+book:        portfolio/hsc_strat_soe_dom/sector_constituents_custom.csv
+rebalance:   portfolio\hsc_strat_soe_dom\backtest_rebalance.json (own copy)
+sector_cap:  max_weight 0.2 from sector_cap.json; on/off switch IGNORED
+tactical:    tactical_group.csv: 1 group(s), 3 claims; tactical_group.json switch IGNORED
+window:      2025-01-02 -> 2026-08-18 (403 sessions), start/end from config
+discipline:  quarterly, anchor_on_rebalance yes, band on, group grain, threshold 0.05, lag 1, fill close_adj, costs 10+10+10 bps
+variants:    run: default, tilt, sector_cap, tactical, sector_cap_tactical
+  skipped:
+    none
+survivorship: local_history.db holds one frozen universe --
+    today's constituents held backwards, no membership history.
+    Every variant shares the bias; levels are optimistic,
+    variant SPREADS are the reliable read.
+built_at:    2026-08-19 15:58
