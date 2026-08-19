@@ -16,8 +16,26 @@ desktop.ini
 ~$*.csv
 ~$*.xlsx
 
+# --- derived, rebuildable ---
+# load_history.py rebuilds this from data/fiinpro/ on every run, so it is a
+# pure function of files that ARE tracked. A ~6 MB binary that is rewritten
+# whole on each build has no business in git history.
+data/local_history.db
+data/local_history.db.building
+data/local_history.db*.wal
+
 # NOT ignored, on purpose:
 #   data/eod.parquet  and  data/raw/*.csv
 # get_index_constituents has no as-of-date parameter, so it always returns
 # CURRENT index membership. The parquet snapshot is the only historical record
 # of what VN100 held on a past date -- it cannot be rebuilt if lost.
+#
+#   data/fiinpro/*.xlsx
+# FiinPro adjusts prices AS OF THE EXTRACT DATE, so re-downloading the same
+# date range later returns different *_adj values. These exports are the only
+# record of the adjustment state they were pulled under -- same argument as
+# the parquet: not reproducible, therefore tracked.
+#
+#   data/local_history.txt
+# Small, diffable, regenerated every build. Its diff is the record of how the
+# store changed between commits.

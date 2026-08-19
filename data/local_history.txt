@@ -1,0 +1,64 @@
+local_history.db - data dictionary
+generated 2026-08-19 14:04:54 by data/load_history.py (do not edit)
+size 6.0 MB
+
+STATE
+  prices   40,867 rows | 102 tickers | 403 sessions | 2025-01-02 -> 2026-08-18
+  tickers  102 rows
+  loads    2 rows
+
+SCHEMA  prices (PK trade_date, ticker) - VND, unadjusted share counts
+  trade_date         DATE     
+  ticker             VARCHAR  
+  reference          DOUBLE   prior session official close
+  ceiling            DOUBLE   price band upper limit; band width encodes exchange
+  floor              DOUBLE   price band lower limit
+  open_raw           DOUBLE   opening price, unadjusted
+  close_raw          DOUBLE   last matched price, unadjusted
+  open_adj           DOUBLE   back-adjusted, as of extract date
+  high_adj           DOUBLE   back-adjusted, as of extract date
+  low_adj            DOUBLE   back-adjusted, as of extract date
+  close_adj          DOUBLE   back-adjusted; UPCoM reports session VWAP
+  volume             BIGINT   matched shares
+  value              DOUBLE   matched turnover
+  outstanding_shares BIGINT   time-varying, on the row
+  free_float         BIGINT   time-varying, on the row
+  market_cap         DOUBLE   official close * outstanding_shares
+
+SCHEMA  tickers
+  ticker             VARCHAR  PK
+  company_name       VARCHAR
+
+SCHEMA  loads  (build manifest: one row per export in this rebuild)
+  file_name, sha256, row_count, replaced, date_min, date_max,
+  ticker_count, loaded_at
+
+VIEW  prices_v = prices + exchange derived from ceiling band
+  <8.5% HOSE | <12.5% HNX | <17.5% UPCOM | else NULL (listing day)
+  HOSE=40,203 UPCOM=661 NULL=3
+
+COVERAGE  sessions per ticker
+  F88      256 sessions  2025-08-08 -> 2026-08-18
+  VPL      319 sessions  2025-05-13 -> 2026-08-18
+  BSR      395 sessions  2025-01-02 -> 2026-08-18
+  DXS      403 sessions  2025-01-02 -> 2026-08-18
+  KDC      403 sessions  2025-01-02 -> 2026-08-18
+  ... 102 tickers total, 403 distinct sessions
+
+BUILD  every export in data/fiinpro/ at the last rebuild
+  Vn100 plus 1.xlsx
+      659 rows | 2 tickers | 2025-01-02 -> 2026-08-18
+  Vn100 plus.xlsx
+      40,208 rows | 100 tickers | 2025-01-02 -> 2026-08-18
+QUALITY  market_cap vs official_close * outstanding_shares
+  255 of 40,867 rows off by >1e-4
+  F88      204 rows  worst    96.2%
+  VCI        3 rows  worst    17.6%
+  MWG        3 rows  worst     0.5%
+  SHB        3 rows  worst     4.0%
+  NVL        3 rows  worst     9.0%
+
+NOT STORED
+  exchange  derived in prices_v; never joined from a snapshot
+  sector    absent from the export; join at query time when needed
+  high_raw / low_raw  FiinPro ships High/Low adjusted only
