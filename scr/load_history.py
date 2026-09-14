@@ -1,7 +1,8 @@
-"""History loader: data/fiinpro/*.xlsx|csv -> data/local_history.db
+"""History loader: data/fiinpro/archive/*.xlsx|csv -> data/local_history.db
 
-The manual half of the pipeline. FiinPro Data Portal exports are downloaded by
-hand, stripped of their banner/footer, and dropped into data/fiinpro/. This
+LEGACY: feeds scr/backtest.py only, until the backtester moves to market.db.
+The forward pipeline is scr/ingest.py -> data/market.db. FiinPro Data Portal
+exports, stripped of their banner/footer, live in data/fiinpro/archive/. This
 script owns every write to the DuckDB store; it derives nothing that FiinPro
 already returned -- it validates, normalises names, and upserts.
 
@@ -33,7 +34,10 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "data"
-DROP = DATA / "fiinpro"
+# LEGACY store for scr/backtest.py only. Its drops were archived when
+# scr/ingest.py took over data/fiinpro/; rebuilding from the top level would
+# replace the backtest history with the forward drop.
+DROP = DATA / "fiinpro" / "archive"
 DB = DATA / "local_history.db"
 TMP = DATA / "local_history.db.building"
 DICT = DATA / "local_history.txt"

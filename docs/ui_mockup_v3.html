@@ -1,0 +1,1030 @@
+﻿<title>PM-Mike Desk</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --ground:#F3F5F2; --surface:#FFFFFF; --sunk:#E8ECE7; --line:#D3D9D2; --line-2:#B9C2B8;
+  --ink:#16201B; --ink-2:#4A564F; --ink-3:#77827B;
+  --accent:#0E6655; --accent-ink:#FFFFFF; --accent-soft:#D5EAE4;
+  --ow:#1B8A3E; --ow-soft:#DCF1E1; --av:#A87A00; --av-soft:#F7ECC9;
+  --uw:#C23A2B; --uw-soft:#F8DEDA; --no:#6F7A74; --no-soft:#E3E7E3;
+  --warn:#9A5B00; --warn-soft:#FBE7C6; --ok:#1B7A45; --ok-soft:#D8EFE0;
+  --shadow:0 1px 2px rgba(22,32,27,.06),0 4px 16px rgba(22,32,27,.06);
+  --sans:"Archivo",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#101512; --surface:#171D19; --sunk:#0C100E; --line:#29322D; --line-2:#3A453F;
+    --ink:#E6ECE7; --ink-2:#A9B4AD; --ink-3:#7B8680;
+    --accent:#4FC2A7; --accent-ink:#06231C; --accent-soft:#163A31;
+    --ow:#56C77A; --ow-soft:#173524; --av:#E2B23C; --av-soft:#3A2F12;
+    --uw:#F0786A; --uw-soft:#3F1E1A; --no:#8B958F; --no-soft:#232A26;
+    --warn:#F0B35A; --warn-soft:#3A2A12; --ok:#5CCB8A; --ok-soft:#163324;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 6px 20px rgba(0,0,0,.35);
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#101512; --surface:#171D19; --sunk:#0C100E; --line:#29322D; --line-2:#3A453F;
+  --ink:#E6ECE7; --ink-2:#A9B4AD; --ink-3:#7B8680;
+  --accent:#4FC2A7; --accent-ink:#06231C; --accent-soft:#163A31;
+  --ow:#56C77A; --ow-soft:#173524; --av:#E2B23C; --av-soft:#3A2F12;
+  --uw:#F0786A; --uw-soft:#3F1E1A; --no:#8B958F; --no-soft:#232A26;
+  --warn:#F0B35A; --warn-soft:#3A2A12; --ok:#5CCB8A; --ok-soft:#163324;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 6px 20px rgba(0,0,0,.35);
+}
+*{box-sizing:border-box}
+body{background:var(--ground);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.5}
+button,input,select,textarea{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.num,td.n,.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+h1,h2,h3{margin:0;text-wrap:balance;font-weight:600;letter-spacing:-.01em}
+h1{font-size:22px} h2{font-size:17px} h3{font-size:14px}
+p{margin:0}
+.label{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-3);font-weight:600}
+
+.app{display:grid;grid-template-columns:232px 1fr;min-height:100vh}
+.rail{background:var(--surface);border-right:1px solid var(--line);padding:18px 14px;display:flex;flex-direction:column;gap:22px;position:sticky;top:0;height:100vh;overflow:auto}
+.brand{display:flex;flex-direction:column;gap:2px;padding-inline:8px}
+.brand b{font-size:16px;letter-spacing:-.01em}
+.brand span{font-family:var(--mono);font-size:11px;color:var(--ink-3)}
+.nav{display:flex;flex-direction:column;gap:2px}
+.nav .label{padding:0 8px 6px}
+.nav button{all:unset;cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 8px;border-radius:6px;color:var(--ink-2);font-size:13.5px}
+.nav button:hover{background:var(--sunk);color:var(--ink)}
+.nav button[aria-current="true"]{background:var(--accent-soft);color:var(--ink);font-weight:600}
+.nav button:focus-visible{outline:2px solid var(--accent)}
+.nav .sub{padding-left:18px;font-family:var(--mono);font-size:12px}
+.rail-foot{margin-top:auto;font-size:12px;color:var(--ink-3);padding-inline:8px;display:flex;flex-direction:column;gap:8px}
+.mock{font-size:11.5px;border:1px dashed var(--line-2);border-radius:6px;padding:8px;color:var(--ink-2)}
+
+main{padding-block:24px 64px;padding-inline:32px;min-width:0}
+.page{display:flex;flex-direction:column;gap:20px;max-width:1240px}
+.head{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap}
+.head .crumbs{font-family:var(--mono);font-size:12px;color:var(--ink-3)}
+
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:8px}
+.panel-h{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.panel-b{padding:16px}
+.panel-f{display:flex;justify-content:flex-end;gap:10px;align-items:center;padding:12px 16px;border-top:1px solid var(--line)}
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.kv{display:grid;grid-template-columns:max-content 1fr;gap:6px 16px;font-size:13px}
+.kv dt{color:var(--ink-3)} .kv dd{margin:0;font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+.btn{cursor:pointer;border:1px solid var(--line-2);background:var(--surface);border-radius:6px;padding:6px 12px;font-weight:500;font-size:13px;white-space:nowrap}
+.btn:hover{background:var(--sunk)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.primary:hover{filter:brightness(1.07)}
+.btn.ghost{border-color:transparent;background:transparent;color:var(--ink-2)}
+.btn.danger{color:var(--uw);border-color:var(--uw)}
+.btn.sm{padding:2px 8px;font-size:11.5px}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+
+.pill{display:inline-flex;align-items:center;gap:6px;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap}
+.pill::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+.pill.ok{background:var(--ok-soft);color:var(--ok)}
+.pill.warn{background:var(--warn-soft);color:var(--warn)}
+.pill.bad{background:var(--uw-soft);color:var(--uw)}
+.pill.off{background:var(--no-soft);color:var(--no)}
+.pill.plain::before{display:none}
+.pill.xs{font-size:10.5px;padding:1px 6px}
+
+table{border-collapse:collapse;width:100%;font-size:13px}
+th{text-align:left;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-3);padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:7px 10px;border-bottom:1px solid var(--line);vertical-align:middle}
+tr:last-child td{border-bottom:0}
+th.n,td.n{text-align:right}
+.scroll{overflow-x:auto}
+
+.console{font-family:var(--mono);font-size:12px;background:var(--sunk);border-top:1px solid var(--line);padding:12px 16px;white-space:pre-wrap;color:var(--ink-2);max-height:220px;overflow:auto;border-radius:0 0 8px 8px}
+.console .w{color:var(--warn)} .console .e{color:var(--uw)} .console .o{color:var(--ok)}
+
+/* portfolio list */
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:16px;display:flex;flex-direction:column;gap:12px;text-align:left}
+.card .open{all:unset;cursor:pointer;display:flex;flex-direction:column;gap:12px}
+.card:hover{border-color:var(--line-2);box-shadow:var(--shadow)}
+.card .nm{font-family:var(--mono);font-size:14px;font-weight:500}
+.card .row{display:flex;justify-content:space-between;gap:8px;font-size:13px;color:var(--ink-2)}
+.card.new{border-style:dashed;align-items:flex-start;justify-content:center;color:var(--ink-2);cursor:pointer}
+.card.new b{color:var(--accent);font-size:15px}
+.card .foot{display:flex;justify-content:space-between;align-items:center;gap:8px;border-top:1px solid var(--line);padding-top:10px;font-size:12.5px}
+.confirm{display:flex;gap:8px;align-items:center;color:var(--uw);font-size:12.5px;flex-wrap:wrap}
+
+/* stepper */
+.steps{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:0;background:var(--surface);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.steps button{all:unset;cursor:pointer;padding:10px 12px;display:flex;flex-direction:column;gap:2px;border-right:1px solid var(--line);position:relative;min-width:0}
+.steps button:last-child{border-right:0}
+.steps button:hover{background:var(--sunk)}
+.steps button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.steps .i{font-family:var(--mono);font-size:11px;color:var(--ink-3)}
+.steps .t{font-weight:600;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.steps .s{font-size:11.5px;color:var(--ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.steps button[aria-current="step"]{background:var(--accent-soft)}
+.steps button[aria-current="step"]::after{content:"";position:absolute;left:0;right:0;bottom:0;height:3px;background:var(--accent)}
+.steps .opt{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-3);margin-left:4px;font-weight:500}
+
+.flow{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:20px;align-items:start}
+.aside{position:sticky;top:16px;display:flex;flex-direction:column;gap:12px}
+.big{font-family:var(--mono);font-size:28px;font-weight:500;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.meter{height:8px;background:var(--sunk);border-radius:4px;position:relative;overflow:visible;margin-top:8px}
+.meter .band{position:absolute;top:0;bottom:0;background:var(--ok-soft);border-left:1px solid var(--ok);border-right:1px solid var(--ok)}
+.meter .dot{position:absolute;top:-4px;width:3px;height:16px;background:var(--ink);border-radius:1px}
+.meter-l{display:flex;justify-content:space-between;font-family:var(--mono);font-size:11px;color:var(--ink-3);margin-top:6px}
+
+/* forms */
+.form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 20px}
+.field{display:flex;flex-direction:column;gap:5px;min-width:0}
+.field.full{grid-column:1/-1}
+.field label{font-size:12.5px;font-weight:600;color:var(--ink-2)}
+.field .hint{font-size:12px;color:var(--ink-3)}
+input[type=text],input[type=number],textarea,select{background:var(--surface);border:1px solid var(--line-2);border-radius:6px;padding:7px 9px;width:100%;min-width:0}
+textarea{resize:vertical;min-height:64px}
+input:focus,textarea:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px;border-color:transparent}
+.inline{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.seg{display:inline-flex;border:1px solid var(--line-2);border-radius:6px;overflow:hidden}
+.seg button{all:unset;cursor:pointer;padding:5px 11px;font-size:12.5px;font-weight:500;border-right:1px solid var(--line-2)}
+.seg button:last-child{border-right:0}
+.seg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink)}
+.seg button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.toggle{display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-weight:500}
+.toggle input{appearance:none;width:32px;height:18px;border-radius:9px;background:var(--line-2);position:relative;cursor:pointer;margin:0;transition:background .15s;flex:none}
+.toggle input::after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--surface);transition:transform .15s}
+.toggle input:checked{background:var(--accent)}
+.toggle input:checked::after{transform:translateX(14px)}
+.check{display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-weight:600}
+.check input{width:16px;height:16px;margin:0;accent-color:var(--accent)}
+.err{color:var(--uw);font-size:12.5px}
+.note{font-size:12.5px;color:var(--ink-2);background:var(--sunk);border-radius:6px;padding:8px 10px}
+.note.warn{background:var(--warn-soft);color:var(--warn)}
+.note.bad{background:var(--uw-soft);color:var(--uw)}
+.small-in{width:84px!important;padding:3px 6px!important;font-family:var(--mono);font-size:12px;text-align:right}
+
+/* book */
+.rate{display:inline-flex;border-radius:6px;overflow:hidden;border:1px solid var(--line-2)}
+.rate button{all:unset;cursor:pointer;font-family:var(--mono);font-size:11.5px;font-weight:500;padding:3px 7px;color:var(--ink-3);border-right:1px solid var(--line)}
+.rate button:last-child{border-right:0}
+.rate button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.rate button[aria-pressed="true"][data-r="OW"]{background:var(--ow-soft);color:var(--ow)}
+.rate button[aria-pressed="true"][data-r="AV"]{background:var(--av-soft);color:var(--av)}
+.rate button[aria-pressed="true"][data-r="UW"]{background:var(--uw-soft);color:var(--uw)}
+.rate button[aria-pressed="true"][data-r="NO"]{background:var(--no-soft);color:var(--no)}
+.rate button:disabled{cursor:not-allowed;opacity:.5}
+.mult{width:64px!important;padding:3px 6px!important;font-family:var(--mono);font-size:12px;text-align:right}
+
+.grp{border-bottom:1px solid var(--line);display:grid;grid-template-columns:200px 1fr;gap:0}
+.grp:last-child{border-bottom:0}
+.grp.isno .gname{color:var(--ink-3)}
+.gside{padding:12px 14px;display:flex;flex-direction:column;gap:8px;border-right:1px solid var(--line);min-width:0}
+.gname{font-weight:600;font-size:13.5px;overflow:hidden;text-overflow:ellipsis}
+.gmeta{font-family:var(--mono);font-size:11.5px;color:var(--ink-3)}
+.gboxes{display:grid;grid-template-columns:1fr 1fr;min-width:0}
+.zone{padding:10px 12px;min-height:64px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.zone + .zone{border-left:1px dashed var(--line)}
+.zone.over{background:var(--accent-soft)}
+.zone-h{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.zone-h .label{font-size:10.5px}
+.chips{display:flex;flex-wrap:wrap;gap:4px}
+.chip{font-family:var(--mono);font-size:11.5px;padding:1px 6px;border-radius:4px;background:var(--sunk);border:1px solid var(--line);cursor:grab;user-select:none;display:inline-flex;gap:4px;align-items:center}
+.chip:hover{border-color:var(--line-2)}
+.chip.in{opacity:.45;cursor:default}
+.chip.inv{text-decoration:line-through;color:var(--ink-3);background:transparent;border-style:dashed;cursor:not-allowed}
+.chip.tac{background:var(--accent-soft);border-color:var(--accent)}
+.chip.claimed{opacity:.55;cursor:default;border-color:var(--accent);border-style:dashed}
+.chip .x{all:unset;cursor:pointer;color:var(--ink-3);padding:0 2px;font-size:12px}
+.chip .x:hover{color:var(--uw)}
+.chip.ghost{opacity:.3}
+.empty{font-size:12px;color:var(--ink-3);font-style:italic}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--ink-3)}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+
+.tacg{border:1px solid var(--accent);border-radius:8px;display:grid;grid-template-columns:200px 1fr;overflow:hidden}
+.tacg .gside{border-right:1px solid var(--line)}
+.tacg .zone{min-height:56px}
+.combo{position:relative;max-width:420px}
+.combo input{padding:5px 9px!important;font-size:13px}
+.combo-list{position:absolute;z-index:20;left:0;right:0;top:calc(100% + 4px);margin:0;padding:4px;list-style:none;background:var(--surface);border:1px solid var(--line-2);border-radius:6px;box-shadow:var(--shadow);max-height:300px;overflow:auto}
+.combo-list li{display:grid;grid-template-columns:52px minmax(0,1fr) auto;gap:10px;align-items:baseline;padding:5px 8px;border-radius:4px;cursor:pointer;font-size:12.5px}
+.combo-list li[aria-selected="true"]{background:var(--accent-soft)}
+.combo-list li:not(.dis):hover{background:var(--sunk)}
+.combo-list li .co{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink-2)}
+.combo-list li .why{font-size:11.5px;color:var(--ink-3);white-space:nowrap}
+.combo-list li.dis{cursor:not-allowed;opacity:.6}
+.combo-list li.dis .why{color:var(--uw)}
+
+/* allocation bars */
+.bar{position:relative;height:14px;background:var(--sunk);border-radius:3px;min-width:120px}
+.bar .b{position:absolute;top:0;bottom:0;left:0;border-right:2px solid var(--ink-3);background:transparent}
+.bar .t{position:absolute;top:3px;bottom:3px;left:0;border-radius:2px}
+.bar .c{position:absolute;top:0;bottom:0;border-left:2px dashed var(--warn)}
+.delta.up{color:var(--ow)} .delta.dn{color:var(--uw)}
+
+/* constraints */
+.cons{display:grid;grid-template-columns:1fr;gap:12px}
+.con{border:1px solid var(--line);border-radius:8px;padding:14px 16px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px 16px;align-items:start}
+.con.on{border-color:var(--accent)}
+.con .body{grid-column:1/-1;display:flex;flex-direction:column;gap:10px;padding-top:6px;border-top:1px solid var(--line)}
+.con .desc{font-size:12.5px;color:var(--ink-3)}
+.status td{font-size:12.5px}
+
+@media (max-width: 1000px){
+  .flow{grid-template-columns:1fr}
+  .aside{position:static}
+  .grp,.tacg{grid-template-columns:1fr}
+  .gside{border-right:0;border-bottom:1px solid var(--line)}
+}
+@media (max-width: 760px){
+  .app{grid-template-columns:1fr}
+  .rail{position:static;height:auto;flex-direction:row;flex-wrap:wrap;gap:12px;border-right:0;border-bottom:1px solid var(--line)}
+  .rail-foot{display:none}
+  .nav{flex-direction:row;flex-wrap:wrap}
+  .nav .label{display:none}
+  main{padding-inline:16px}
+  .grid2,.form,.gboxes{grid-template-columns:1fr}
+  .zone + .zone{border-left:0;border-top:1px dashed var(--line)}
+  .steps{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .steps button{border-bottom:1px solid var(--line)}
+}
+@media (prefers-reduced-motion: reduce){*{transition:none!important}}
+</style>
+
+<div class="app">
+  <aside class="rail">
+    <div class="brand"><b>PM-Mike Desk</b><span id="railAnchor"></span></div>
+    <nav class="nav" id="nav"></nav>
+    <div class="rail-foot">
+      <div class="mock"><b>Mockup v2.</b> Real data from market.db, the tilt and constraint solver run in the page. Nothing is written to disk.</div>
+    </div>
+  </aside>
+  <main id="main"></main>
+</div>
+
+<script>
+const DATA = {"anchor": "2026-09-11", "sessions": ["2026-01-05", "2026-01-06", "2026-01-07", "2026-01-08", "2026-01-09", "2026-01-12", "2026-01-13", "2026-01-14", "2026-01-15", "2026-01-16", "2026-01-19", "2026-01-20", "2026-01-21", "2026-01-22", "2026-01-23", "2026-01-26", "2026-01-27", "2026-01-28", "2026-01-29", "2026-01-30", "2026-02-02", "2026-02-03", "2026-02-04", "2026-02-05", "2026-02-06", "2026-02-09", "2026-02-10", "2026-02-11", "2026-02-12", "2026-02-13", "2026-02-23", "2026-02-24", "2026-02-25", "2026-02-26", "2026-02-27", "2026-03-02", "2026-03-03", "2026-03-04", "2026-03-05", "2026-03-06", "2026-03-09", "2026-03-10", "2026-03-11", "2026-03-12", "2026-03-13", "2026-03-16", "2026-03-17", "2026-03-18", "2026-03-19", "2026-03-20", "2026-03-23", "2026-03-24", "2026-03-25", "2026-03-26", "2026-03-27", "2026-03-30", "2026-03-31", "2026-04-01", "2026-04-02", "2026-04-03", "2026-04-06", "2026-04-07", "2026-04-08", "2026-04-09", "2026-04-10", "2026-04-13", "2026-04-14", "2026-04-15", "2026-04-16", "2026-04-17", "2026-04-20", "2026-04-21", "2026-04-22", "2026-04-23", "2026-04-24", "2026-04-28", "2026-04-29", "2026-05-04", "2026-05-05", "2026-05-06", "2026-05-07", "2026-05-08", "2026-05-11", "2026-05-12", "2026-05-13", "2026-05-14", "2026-05-15", "2026-05-18", "2026-05-19", "2026-05-20", "2026-05-21", "2026-05-22", "2026-05-25", "2026-05-26", "2026-05-27", "2026-05-28", "2026-05-29", "2026-06-01", "2026-06-02", "2026-06-03", "2026-06-04", "2026-06-05", "2026-06-08", "2026-06-09", "2026-06-10", "2026-06-11", "2026-06-12", "2026-06-15", "2026-06-16", "2026-06-17", "2026-06-18", "2026-06-19", "2026-06-22", "2026-06-23", "2026-06-24", "2026-06-25", "2026-06-26", "2026-06-29", "2026-06-30", "2026-07-01", "2026-07-02", "2026-07-03", "2026-07-06", "2026-07-07", "2026-07-08", "2026-07-09", "2026-07-10", "2026-07-13", "2026-07-14", "2026-07-15", "2026-07-16", "2026-07-17", "2026-07-20", "2026-07-21", "2026-07-22", "2026-07-23", "2026-07-24", "2026-07-27", "2026-07-28", "2026-07-29", "2026-07-30", "2026-07-31", "2026-08-03", "2026-08-04", "2026-08-05", "2026-08-06", "2026-08-07", "2026-08-10", "2026-08-11", "2026-08-12", "2026-08-13", "2026-08-14", "2026-08-17", "2026-08-18", "2026-08-19", "2026-08-20", "2026-08-21", "2026-08-24", "2026-08-25", "2026-08-26", "2026-08-27", "2026-08-28", "2026-09-03", "2026-09-04", "2026-09-07", "2026-09-08", "2026-09-09", "2026-09-10", "2026-09-11"], "co": {"LPB": "LPBank", "STB": "Sacombank", "TCB": "Techcombank", "VPB": "VPBank", "ACB": "Asia Commercial Bank", "HDB": "HDBank", "SHB": "SHB", "VIB": "VIBBank", "MSB": "MSB Bank", "EIB": "Eximbank", "SSB": "SeABank", "TPB": "TPBank", "NAB": "Nam A Bank", "OCB": "OCB Bank", "VIC": "VinGroup", "VHM": "Vinhomes", "NVL": "Novaland", "KDH": "Khang Dien House", "DXG": "Bluemarq Group", "SJS": "SJ Group", "NLG": "Nam Long Investment", "VPI": "Van Phu - Invest", "DIG": "DIC Corp", "PDR": "Phat Dat Real Estate", "HDG": "HA DO Construction", "TAL": "Taseco Land", "KOS": "KOSY Company", "SSI": "SSI Securities", "VIX": "VIX Securities", "VCK": "VPS Securities", "VND": "VNDIRECT", "VCI": "Vietcap Securities", "TCX": "TCBS Securities", "HCM": "HSC Securities", "VPX": "VPBank Securities", "EVF": "EVN General Finance", "FTS": "FPT Securities", "DSE": "DNSE Securities", "CTS": "Vietinbank Securities", "BSI": "BIDV Securities", "MBB": "MBBank", "VCB": "Vietcombank", "CTG": "VietinBank", "BID": "BIDV", "MSN": "Masan Group", "MCH": "Masan Consumer", "VNM": "Vinamilk", "SAB": "SABECO", "KDC": "KIDO Group", "MWG": "Mobile World Investment", "PNJ": "Phu Nhuan Jewelry", "FRT": "FPT Retail", "DGW": "Digiworld Corp.", "HPG": "Hoa Phat Group", "HSG": "Hoa Sen Group", "NKG": "Nam Kim Steel", "FPT": "FPT Corp", "CMG": "CMC Corporation", "VJC": "Vietjet Air", "VPL": "Vinpearl", "GMD": "Gemadept Group", "VSC": "Vietnam Container Shipping", "PVT": "PVTrans", "VTP": "Viettel Post", "SBT": "Thanh Thanh Cong - Bien Hoa Sugar", "HAG": "HAGL Joint Stock Company", "BAF": "BAF Vietnam Agriculture", "VHC": "Vinh Hoan Corp.", "DBC": "DABACO", "PAN": "The PAN Group", "ANV": "Nam Viet", "CII": "Ho Chi Minh Infrastructure", "VCG": "Vinaconex Group", "PC1": "PC1 Group", "HHV": "Deo Ca Traffic Infrastructure Investment", "CTD": "COTECCONS construction", "CTR": "Viettel Construction", "GEX": "Gelex Group JSC", "GEE": "GELEX Electricity", "VRE": "Vincom Retail", "TCH": "Hoang Huy Investment Financial Services", "REE": "Refrigeration Electrical Engineering", "GAS": "PetroVietnam Gas", "POW": "PV Power", "BWE": "Binh Duong Water Environment", "NT2": "Nhon Trach 2 Power", "BSR": "PetroVietnam Refining and Petrochemical", "PVD": "PetroVietNam Drilling & Well", "PLX": "Petrolimex", "KBC": "Kinh Bac Urban Development", "SIP": "SVGR CORP", "BCM": "Becamex Group", "DPM": "Petrovietnam Fertilizer and Chemicals", "GVR": "Viet Nam Rubber Group", "DCM": "PetroVietnam Camau Fertilizer", "PHR": "Phuoc Hoa rubber", "BMP": "Binh Minh Plastics", "VGC": "Viglacera Corporation", "HT1": "VICEM Ha Tien", "BVH": "Bao Viet Group"}, "market": {"rows": 16900, "tickers": 100, "sessions": 169, "loads": [["VN100 data.xlsx", "16900", "100", "2026-01-05", "2026-09-11", "100", "2026-09-14 11:58:29.545795"]]}, "anchors": {"2026-06-30": [{"name": "Banks - Private", "weight": 0.305164, "members": [{"t": "LPB", "fcap": 151829, "to": 0.417}, {"t": "STB", "fcap": 132172, "to": 0.349}, {"t": "TCB", "fcap": 130564, "to": 0.402}, {"t": "VPB", "fcap": 117819, "to": 0.335}, {"t": "ACB", "fcap": 111750, "to": 0.587}, {"t": "HDB", "fcap": 103509, "to": 0.305}, {"t": "SHB", "fcap": 54305, "to": 1.332}, {"t": "VIB", "fcap": 36508, "to": 0.504}, {"t": "MSB", "fcap": 35381, "to": 0.797}, {"t": "EIB", "fcap": 31294, "to": 0.58}, {"t": "SSB", "fcap": 27773, "to": 0.331}, {"t": "TPB", "fcap": 25327, "to": 1.008}, {"t": "NAB", "fcap": 22797, "to": 0.195}, {"t": "OCB", "fcap": 10106, "to": 0.771}]}, {"name": "Real Estate - Residential", "weight": 0.273726, "members": [{"t": "VIC", "fcap": 593364, "to": 0.291}, {"t": "VHM", "fcap": 187052, "to": 0.437}, {"t": "NVL", "fcap": 19361, "to": 1.137}, {"t": "KDH", "fcap": 15756, "to": 0.596}, {"t": "DXG", "fcap": 12833, "to": 0.865}, {"t": "SJS", "fcap": 10709, "to": 0.181}, {"t": "NLG", "fcap": 10148, "to": 0.542}, {"t": "VPI", "fcap": 9922, "to": 1.071}, {"t": "DIG", "fcap": 9420, "to": 0.539}, {"t": "PDR", "fcap": 8831, "to": 1.231}, {"t": "HDG", "fcap": 5079, "to": 0.551}, {"t": "TAL", "fcap": 3345, "to": 0.106}, {"t": "KOS", "fcap": 3208, "to": 0.432}]}, {"name": "Financial Services", "weight": 0.072275, "members": [{"t": "SSI", "fcap": 46833, "to": 0.807}, {"t": "VIX", "fcap": 41410, "to": 1.519}, {"t": "VCK", "fcap": 40298, "to": 0.355}, {"t": "VND", "fcap": 20209, "to": 1.493}, {"t": "VCI", "fcap": 19640, "to": 0.781}, {"t": "TCX", "fcap": 18474, "to": 0.42}, {"t": "HCM", "fcap": 17625, "to": 1.828}, {"t": "VPX", "fcap": 10725, "to": 0.636}, {"t": "EVF", "fcap": 9465, "to": 0.637}, {"t": "FTS", "fcap": 4048, "to": 0.909}, {"t": "DSE", "fcap": 2884, "to": 0.309}, {"t": "CTS", "fcap": 1780, "to": 2.492}, {"t": "BSI", "fcap": 1349, "to": 1.441}]}, {"name": "Banks - State", "weight": 0.066732, "members": [{"t": "MBB", "fcap": 101493, "to": 0.289}, {"t": "VCB", "fcap": 57170, "to": 0.475}, {"t": "CTG", "fcap": 39553, "to": 0.602}, {"t": "BID", "fcap": 18520, "to": 0.878}]}, {"name": "Food - Staples & Beverage", "weight": 0.053853, "members": [{"t": "MSN", "fcap": 63176, "to": 0.653}, {"t": "MCH", "fcap": 52558, "to": 0.106}, {"t": "VNM", "fcap": 45812, "to": 0.397}, {"t": "SAB", "fcap": 6842, "to": 0.492}, {"t": "KDC", "fcap": 6521, "to": 1.101}]}, {"name": "Consumer Retail", "weight": 0.040692, "members": [{"t": "MWG", "fcap": 86013, "to": 0.465}, {"t": "PNJ", "fcap": 29015, "to": 0.224}, {"t": "FRT", "fcap": 11802, "to": 0.728}, {"t": "DGW", "fcap": 5335, "to": 0.559}]}, {"name": "Steel", "weight": 0.036713, "members": [{"t": "HPG", "fcap": 108197, "to": 0.411}, {"t": "HSG", "fcap": 6611, "to": 0.461}, {"t": "NKG", "fcap": 4431, "to": 0.421}]}, {"name": "Technology", "weight": 0.03227, "members": [{"t": "FPT", "fcap": 102294, "to": 0.766}, {"t": "CMG", "fcap": 2515, "to": 0.28}]}, {"name": "Travel & Leisure", "weight": 0.022302, "members": [{"t": "VJC", "fcap": 48280, "to": 1.08}, {"t": "VPL", "fcap": 24156, "to": 0.333}]}, {"name": "Logistics", "weight": 0.014185, "members": [{"t": "GMD", "fcap": 29821, "to": 0.31}, {"t": "VSC", "fcap": 6757, "to": 1.278}, {"t": "PVT", "fcap": 5130, "to": 0.984}, {"t": "VTP", "fcap": 4363, "to": 0.56}]}, {"name": "Food - Agriculture", "weight": 0.01382, "members": [{"t": "SBT", "fcap": 11557, "to": 0.449}, {"t": "HAG", "fcap": 9696, "to": 0.495}, {"t": "BAF", "fcap": 7572, "to": 1.08}, {"t": "VHC", "fcap": 5608, "to": 0.286}, {"t": "DBC", "fcap": 5597, "to": 0.627}, {"t": "PAN", "fcap": 3157, "to": 0.477}, {"t": "ANV", "fcap": 1697, "to": 0.653}]}, {"name": "Construction Contractors", "weight": 0.011557, "members": [{"t": "CII", "fcap": 11108, "to": 2.069}, {"t": "VCG", "fcap": 7396, "to": 0.844}, {"t": "PC1", "fcap": 6175, "to": 1.937}, {"t": "HHV", "fcap": 4990, "to": 0.612}, {"t": "CTD", "fcap": 4471, "to": 0.726}, {"t": "CTR", "fcap": 3395, "to": 0.85}]}, {"name": "Industrial", "weight": 0.011235, "members": [{"t": "GEX", "fcap": 28806, "to": 1.434}, {"t": "GEE", "fcap": 7685, "to": 1.688}]}, {"name": "Real Estate - Commercial", "weight": 0.010427, "members": [{"t": "VRE", "fcap": 25904, "to": 0.622}, {"t": "TCH", "fcap": 7963, "to": 0.764}]}, {"name": "Utilities", "weight": 0.010354, "members": [{"t": "REE", "fcap": 10824, "to": 0.236}, {"t": "GAS", "fcap": 9338, "to": 1.012}, {"t": "POW", "fcap": 9019, "to": 1.753}, {"t": "BWE", "fcap": 2474, "to": 0.299}, {"t": "NT2", "fcap": 1973, "to": 0.504}]}, {"name": "Oil & Gas", "weight": 0.007231, "members": [{"t": "BSR", "fcap": 9674, "to": 2.217}, {"t": "PVD", "fcap": 9116, "to": 1.468}, {"t": "PLX", "fcap": 4695, "to": 2.157}]}, {"name": "Real Estate - Industrial", "weight": 0.007219, "members": [{"t": "KBC", "fcap": 15798, "to": 0.75}, {"t": "SIP", "fcap": 5480, "to": 0.338}, {"t": "BCM", "fcap": 2169, "to": 0.718}]}, {"name": "Chemicals", "weight": 0.005896, "members": [{"t": "DPM", "fcap": 6255, "to": 1.059}, {"t": "GVR", "fcap": 5248, "to": 1.479}, {"t": "DCM", "fcap": 4659, "to": 1.791}, {"t": "PHR", "fcap": 2988, "to": 0.862}]}, {"name": "Building Materials", "weight": 0.002872, "members": [{"t": "BMP", "fcap": 5632, "to": 0.363}, {"t": "VGC", "fcap": 2421, "to": 0.653}, {"t": "HT1", "fcap": 1274, "to": 0.169}]}, {"name": "Insurance", "weight": 0.001476, "members": [{"t": "BVH", "fcap": 4795, "to": 0.537}]}], "2026-07-31": [{"name": "Banks - Private", "weight": 0.308002, "members": [{"t": "LPB", "fcap": 147004, "to": 0.357}, {"t": "STB", "fcap": 127695, "to": 0.243}, {"t": "TCB", "fcap": 112831, "to": 0.407}, {"t": "VPB", "fcap": 108219, "to": 0.397}, {"t": "ACB", "fcap": 108049, "to": 0.374}, {"t": "HDB", "fcap": 100906, "to": 0.428}, {"t": "SHB", "fcap": 46089, "to": 1.648}, {"t": "MSB", "fcap": 34835, "to": 0.59}, {"t": "VIB", "fcap": 32083, "to": 0.516}, {"t": "SSB", "fcap": 26659, "to": 0.367}, {"t": "EIB", "fcap": 26525, "to": 0.697}, {"t": "TPB", "fcap": 21513, "to": 0.69}, {"t": "NAB", "fcap": 20984, "to": 0.168}, {"t": "OCB", "fcap": 9325, "to": 0.529}]}, {"name": "Real Estate - Residential", "weight": 0.28749, "members": [{"t": "VIC", "fcap": 581659, "to": 0.164}, {"t": "VHM", "fcap": 182492, "to": 0.447}, {"t": "NVL", "fcap": 20297, "to": 1.11}, {"t": "KDH", "fcap": 12729, "to": 0.825}, {"t": "SJS", "fcap": 10519, "to": 0.369}, {"t": "DXG", "fcap": 10449, "to": 1.233}, {"t": "VPI", "fcap": 10226, "to": 0.722}, {"t": "NLG", "fcap": 8615, "to": 0.564}, {"t": "DIG", "fcap": 7604, "to": 1.402}, {"t": "PDR", "fcap": 6855, "to": 1.499}, {"t": "HDG", "fcap": 3943, "to": 0.985}, {"t": "KOS", "fcap": 3074, "to": 0.544}, {"t": "TAL", "fcap": 2803, "to": 0.217}]}, {"name": "Banks - State", "weight": 0.06596, "members": [{"t": "MBB", "fcap": 90619, "to": 0.381}, {"t": "VCB", "fcap": 54504, "to": 0.508}, {"t": "CTG", "fcap": 35883, "to": 0.858}, {"t": "BID", "fcap": 16599, "to": 0.97}]}, {"name": "Financial Services", "weight": 0.064218, "members": [{"t": "SSI", "fcap": 41231, "to": 1.407}, {"t": "VIX", "fcap": 31854, "to": 2.069}, {"t": "HCM", "fcap": 20249, "to": 1.174}, {"t": "VND", "fcap": 18953, "to": 1.635}, {"t": "VCK", "fcap": 18871, "to": 0.53}, {"t": "VCI", "fcap": 17180, "to": 1.293}, {"t": "TCX", "fcap": 17063, "to": 0.452}, {"t": "VPX", "fcap": 9525, "to": 0.794}, {"t": "EVF", "fcap": 8815, "to": 0.478}, {"t": "FTS", "fcap": 3263, "to": 1.324}, {"t": "DSE", "fcap": 2852, "to": 0.507}, {"t": "CTS", "fcap": 1487, "to": 4.698}, {"t": "BSI", "fcap": 1043, "to": 2.307}]}, {"name": "Food - Staples & Beverage", "weight": 0.052765, "members": [{"t": "MSN", "fcap": 57918, "to": 0.559}, {"t": "VNM", "fcap": 50911, "to": 0.553}, {"t": "MCH", "fcap": 36869, "to": 0.591}, {"t": "KDC", "fcap": 6230, "to": 0.959}, {"t": "SAB", "fcap": 6144, "to": 0.446}]}, {"name": "Steel", "weight": 0.037004, "members": [{"t": "HPG", "fcap": 100767, "to": 0.548}, {"t": "HSG", "fcap": 6046, "to": 0.558}, {"t": "NKG", "fcap": 4043, "to": 0.479}]}, {"name": "Consumer Retail", "weight": 0.036296, "members": [{"t": "MWG", "fcap": 77367, "to": 0.534}, {"t": "PNJ", "fcap": 14277, "to": 2.911}, {"t": "FRT", "fcap": 12235, "to": 0.486}, {"t": "DGW", "fcap": 4857, "to": 0.572}]}, {"name": "Technology", "weight": 0.033393, "members": [{"t": "FPT", "fcap": 97777, "to": 0.61}, {"t": "CMG", "fcap": 2264, "to": 0.227}]}, {"name": "Travel & Leisure", "weight": 0.021588, "members": [{"t": "VJC", "fcap": 43261, "to": 0.722}, {"t": "VPL", "fcap": 21412, "to": 0.413}]}, {"name": "Logistics", "weight": 0.014925, "members": [{"t": "GMD", "fcap": 31198, "to": 0.511}, {"t": "VSC", "fcap": 4908, "to": 2.992}, {"t": "PVT", "fcap": 4730, "to": 1.229}, {"t": "VTP", "fcap": 3876, "to": 0.587}]}, {"name": "Food - Agriculture", "weight": 0.014059, "members": [{"t": "SBT", "fcap": 11557, "to": 0.197}, {"t": "HAG", "fcap": 8872, "to": 0.484}, {"t": "BAF", "fcap": 7585, "to": 0.606}, {"t": "VHC", "fcap": 4958, "to": 0.261}, {"t": "DBC", "fcap": 4918, "to": 0.824}, {"t": "PAN", "fcap": 2868, "to": 0.24}, {"t": "ANV", "fcap": 1362, "to": 0.874}]}, {"name": "Construction Contractors", "weight": 0.010544, "members": [{"t": "CII", "fcap": 8363, "to": 1.607}, {"t": "VCG", "fcap": 5952, "to": 1.11}, {"t": "PC1", "fcap": 5721, "to": 1.265}, {"t": "HHV", "fcap": 4578, "to": 0.881}, {"t": "CTD", "fcap": 3752, "to": 0.919}, {"t": "CTR", "fcap": 3224, "to": 0.569}]}, {"name": "Utilities", "weight": 0.010447, "members": [{"t": "REE", "fcap": 10138, "to": 0.267}, {"t": "POW", "fcap": 8345, "to": 2.274}, {"t": "GAS", "fcap": 8276, "to": 1.152}, {"t": "BWE", "fcap": 2724, "to": 0.646}, {"t": "NT2", "fcap": 1814, "to": 0.655}]}, {"name": "Real Estate - Commercial", "weight": 0.009607, "members": [{"t": "VRE", "fcap": 22541, "to": 0.586}, {"t": "TCH", "fcap": 6239, "to": 0.999}]}, {"name": "Industrial", "weight": 0.008736, "members": [{"t": "GEX", "fcap": 20608, "to": 1.9}, {"t": "GEE", "fcap": 5562, "to": 1.719}]}, {"name": "Oil & Gas", "weight": 0.007612, "members": [{"t": "BSR", "fcap": 10155, "to": 2.415}, {"t": "PVD", "fcap": 8419, "to": 2.258}, {"t": "PLX", "fcap": 4231, "to": 1.722}]}, {"name": "Real Estate - Industrial", "weight": 0.007049, "members": [{"t": "KBC", "fcap": 14399, "to": 0.47}, {"t": "SIP", "fcap": 5241, "to": 0.072}, {"t": "BCM", "fcap": 1478, "to": 1.439}]}, {"name": "Chemicals", "weight": 0.005862, "members": [{"t": "DPM", "fcap": 6405, "to": 1.248}, {"t": "GVR", "fcap": 4400, "to": 0.998}, {"t": "DCM", "fcap": 4063, "to": 1.867}, {"t": "PHR", "fcap": 2694, "to": 0.775}]}, {"name": "Building Materials", "weight": 0.002953, "members": [{"t": "BMP", "fcap": 5647, "to": 0.416}, {"t": "VGC", "fcap": 2036, "to": 0.707}, {"t": "HT1", "fcap": 1164, "to": 0.546}]}, {"name": "Insurance", "weight": 0.001489, "members": [{"t": "BVH", "fcap": 4461, "to": 0.513}]}], "2026-09-07": [{"name": "Banks - Private", "weight": 0.311192, "members": [{"t": "STB", "fcap": 137187, "to": 0.254}, {"t": "LPB", "fcap": 133487, "to": 0.162}, {"t": "TCB", "fcap": 124328, "to": 0.554}, {"t": "VPB", "fcap": 119128, "to": 0.423}, {"t": "ACB", "fcap": 109776, "to": 0.178}, {"t": "HDB", "fcap": 109515, "to": 0.39}, {"t": "SHB", "fcap": 47693, "to": 1.347}, {"t": "MSB", "fcap": 34464, "to": 0.934}, {"t": "SSB", "fcap": 34055, "to": 0.402}, {"t": "VIB", "fcap": 27896, "to": 0.567}, {"t": "EIB", "fcap": 25184, "to": 0.504}, {"t": "TPB", "fcap": 22199, "to": 0.49}, {"t": "NAB", "fcap": 19516, "to": 0.104}, {"t": "OCB", "fcap": 9417, "to": 0.57}]}, {"name": "Real Estate - Residential", "weight": 0.279235, "members": [{"t": "VIC", "fcap": 570521, "to": 0.244}, {"t": "VHM", "fcap": 183601, "to": 0.365}, {"t": "NVL", "fcap": 17175, "to": 1.329}, {"t": "SJS", "fcap": 13398, "to": 0.194}, {"t": "KDH", "fcap": 12656, "to": 0.776}, {"t": "DXG", "fcap": 11667, "to": 1.135}, {"t": "VPI", "fcap": 10650, "to": 1.372}, {"t": "NLG", "fcap": 9896, "to": 0.666}, {"t": "DIG", "fcap": 8398, "to": 0.923}, {"t": "PDR", "fcap": 7214, "to": 0.961}, {"t": "HDG", "fcap": 4151, "to": 0.489}, {"t": "TAL", "fcap": 3614, "to": 0.141}, {"t": "KOS", "fcap": 2953, "to": 0.687}]}, {"name": "Banks - State", "weight": 0.067758, "members": [{"t": "MBB", "fcap": 101694, "to": 0.259}, {"t": "VCB", "fcap": 53309, "to": 0.518}, {"t": "CTG", "fcap": 35883, "to": 0.688}, {"t": "BID", "fcap": 16801, "to": 0.814}]}, {"name": "Financial Services", "weight": 0.064341, "members": [{"t": "SSI", "fcap": 43804, "to": 1.205}, {"t": "VIX", "fcap": 34990, "to": 1.936}, {"t": "HCM", "fcap": 19601, "to": 1.253}, {"t": "VCI", "fcap": 18753, "to": 1.301}, {"t": "VND", "fcap": 18268, "to": 1.044}, {"t": "VCK", "fcap": 17958, "to": 0.38}, {"t": "TCX", "fcap": 16522, "to": 0.506}, {"t": "VPX", "fcap": 9281, "to": 0.538}, {"t": "EVF", "fcap": 8743, "to": 0.232}, {"t": "DSE", "fcap": 3365, "to": 0.374}, {"t": "FTS", "fcap": 3324, "to": 0.604}, {"t": "CTS", "fcap": 1525, "to": 2.597}, {"t": "BSI", "fcap": 1083, "to": 1.045}]}, {"name": "Food - Staples & Beverage", "weight": 0.052416, "members": [{"t": "MSN", "fcap": 60109, "to": 0.508}, {"t": "VNM", "fcap": 50744, "to": 0.525}, {"t": "MCH", "fcap": 37078, "to": 0.172}, {"t": "KDC", "fcap": 6404, "to": 2.57}, {"t": "SAB", "fcap": 6328, "to": 0.72}]}, {"name": "Steel", "weight": 0.038859, "members": [{"t": "HPG", "fcap": 109168, "to": 0.409}, {"t": "HSG", "fcap": 5990, "to": 0.384}, {"t": "NKG", "fcap": 3951, "to": 0.434}]}, {"name": "Consumer Retail", "weight": 0.037821, "members": [{"t": "MWG", "fcap": 79691, "to": 0.423}, {"t": "PNJ", "fcap": 17685, "to": 1.264}, {"t": "FRT", "fcap": 13415, "to": 0.841}, {"t": "DGW", "fcap": 5135, "to": 1.297}]}, {"name": "Technology", "weight": 0.035133, "members": [{"t": "FPT", "fcap": 105500, "to": 0.483}, {"t": "CMG", "fcap": 2189, "to": 0.149}]}, {"name": "Travel & Leisure", "weight": 0.018095, "members": [{"t": "VJC", "fcap": 33648, "to": 0.96}, {"t": "VPL", "fcap": 21815, "to": 0.226}]}, {"name": "Logistics", "weight": 0.014934, "members": [{"t": "GMD", "fcap": 31584, "to": 0.531}, {"t": "PVT", "fcap": 5156, "to": 1.677}, {"t": "VSC", "fcap": 4837, "to": 3.795}, {"t": "VTP", "fcap": 4199, "to": 1.325}]}, {"name": "Food - Agriculture", "weight": 0.013882, "members": [{"t": "SBT", "fcap": 12509, "to": 0.394}, {"t": "HAG", "fcap": 8872, "to": 0.33}, {"t": "BAF", "fcap": 8223, "to": 1.14}, {"t": "DBC", "fcap": 5114, "to": 0.893}, {"t": "VHC", "fcap": 4382, "to": 0.494}, {"t": "PAN", "fcap": 2121, "to": 0.645}, {"t": "ANV", "fcap": 1330, "to": 0.662}]}, {"name": "Utilities", "weight": 0.010519, "members": [{"t": "GAS", "fcap": 9990, "to": 1.428}, {"t": "REE", "fcap": 9982, "to": 0.143}, {"t": "POW", "fcap": 7884, "to": 2.068}, {"t": "BWE", "fcap": 2620, "to": 0.176}, {"t": "NT2", "fcap": 1766, "to": 0.891}]}, {"name": "Construction Contractors", "weight": 0.01047, "members": [{"t": "CII", "fcap": 9225, "to": 1.506}, {"t": "VCG", "fcap": 6010, "to": 0.556}, {"t": "PC1", "fcap": 4948, "to": 0.683}, {"t": "HHV", "fcap": 4835, "to": 0.617}, {"t": "CTD", "fcap": 3758, "to": 0.442}, {"t": "CTR", "fcap": 3318, "to": 0.794}]}, {"name": "Real Estate - Commercial", "weight": 0.010403, "members": [{"t": "VRE", "fcap": 24541, "to": 0.625}, {"t": "TCH", "fcap": 7344, "to": 1.021}]}, {"name": "Industrial", "weight": 0.009195, "members": [{"t": "GEX", "fcap": 22715, "to": 1.465}, {"t": "GEE", "fcap": 5470, "to": 2.118}]}, {"name": "Real Estate - Industrial", "weight": 0.007743, "members": [{"t": "KBC", "fcap": 16650, "to": 0.343}, {"t": "SIP", "fcap": 5328, "to": 0.119}, {"t": "BCM", "fcap": 1755, "to": 2.618}]}, {"name": "Oil & Gas", "weight": 0.007694, "members": [{"t": "BSR", "fcap": 10535, "to": 2.465}, {"t": "PVD", "fcap": 8582, "to": 1.802}, {"t": "PLX", "fcap": 4466, "to": 3.356}]}, {"name": "Chemicals", "weight": 0.005964, "members": [{"t": "DPM", "fcap": 6065, "to": 1.099}, {"t": "GVR", "fcap": 5072, "to": 1.675}, {"t": "DCM", "fcap": 4209, "to": 2.004}, {"t": "PHR", "fcap": 2936, "to": 0.952}]}, {"name": "Building Materials", "weight": 0.002792, "members": [{"t": "BMP", "fcap": 5231, "to": 0.21}, {"t": "VGC", "fcap": 2144, "to": 0.801}, {"t": "HT1", "fcap": 1183, "to": 0.533}]}, {"name": "Insurance", "weight": 0.001552, "members": [{"t": "BVH", "fcap": 4758, "to": 0.672}]}], "2026-09-08": [{"name": "Banks - Private", "weight": 0.309743, "members": [{"t": "STB", "fcap": 136292, "to": 0.257}, {"t": "LPB", "fcap": 131739, "to": 0.168}, {"t": "TCB", "fcap": 124523, "to": 0.548}, {"t": "VPB", "fcap": 119564, "to": 0.423}, {"t": "ACB", "fcap": 110023, "to": 0.169}, {"t": "HDB", "fcap": 109515, "to": 0.381}, {"t": "SHB", "fcap": 47492, "to": 1.325}, {"t": "SSB", "fcap": 34341, "to": 0.44}, {"t": "MSB", "fcap": 34332, "to": 0.916}, {"t": "VIB", "fcap": 28177, "to": 0.524}, {"t": "EIB", "fcap": 24960, "to": 0.507}, {"t": "TPB", "fcap": 22123, "to": 0.438}, {"t": "NAB", "fcap": 19516, "to": 0.102}, {"t": "OCB", "fcap": 9463, "to": 0.568}]}, {"name": "Real Estate - Residential", "weight": 0.280835, "members": [{"t": "VIC", "fcap": 581233, "to": 0.241}, {"t": "VHM", "fcap": 181383, "to": 0.339}, {"t": "NVL", "fcap": 17043, "to": 1.201}, {"t": "SJS", "fcap": 13398, "to": 0.194}, {"t": "KDH", "fcap": 12546, "to": 0.775}, {"t": "DXG", "fcap": 11667, "to": 1.17}, {"t": "VPI", "fcap": 10315, "to": 1.44}, {"t": "NLG", "fcap": 9702, "to": 0.683}, {"t": "DIG", "fcap": 8221, "to": 0.902}, {"t": "PDR", "fcap": 7184, "to": 0.926}, {"t": "HDG", "fcap": 4066, "to": 0.501}, {"t": "TAL", "fcap": 3508, "to": 0.127}, {"t": "KOS", "fcap": 2940, "to": 0.794}]}, {"name": "Banks - State", "weight": 0.067529, "members": [{"t": "MBB", "fcap": 101443, "to": 0.25}, {"t": "VCB", "fcap": 53401, "to": 0.527}, {"t": "CTG", "fcap": 35825, "to": 0.667}, {"t": "BID", "fcap": 16894, "to": 0.832}]}, {"name": "Financial Services", "weight": 0.06462, "members": [{"t": "SSI", "fcap": 44119, "to": 1.183}, {"t": "VIX", "fcap": 35376, "to": 1.922}, {"t": "HCM", "fcap": 19675, "to": 1.148}, {"t": "VCI", "fcap": 18753, "to": 1.237}, {"t": "VCK", "fcap": 18384, "to": 0.374}, {"t": "VND", "fcap": 18325, "to": 1.028}, {"t": "TCX", "fcap": 16647, "to": 0.482}, {"t": "VPX", "fcap": 9356, "to": 0.528}, {"t": "EVF", "fcap": 8707, "to": 0.248}, {"t": "DSE", "fcap": 3365, "to": 0.371}, {"t": "FTS", "fcap": 3316, "to": 0.592}, {"t": "CTS", "fcap": 1518, "to": 2.552}, {"t": "BSI", "fcap": 1084, "to": 1.025}]}, {"name": "Food - Staples & Beverage", "weight": 0.052375, "members": [{"t": "MSN", "fcap": 59934, "to": 0.503}, {"t": "VNM", "fcap": 50995, "to": 0.502}, {"t": "MCH", "fcap": 37287, "to": 0.165}, {"t": "KDC", "fcap": 6429, "to": 2.254}, {"t": "SAB", "fcap": 6342, "to": 0.619}]}, {"name": "Steel", "weight": 0.039251, "members": [{"t": "HPG", "fcap": 110687, "to": 0.389}, {"t": "HSG", "fcap": 5990, "to": 0.38}, {"t": "NKG", "fcap": 3969, "to": 0.417}]}, {"name": "Consumer Retail", "weight": 0.037929, "members": [{"t": "MWG", "fcap": 80023, "to": 0.391}, {"t": "PNJ", "fcap": 17685, "to": 1.211}, {"t": "FRT", "fcap": 13720, "to": 0.765}, {"t": "DGW", "fcap": 5153, "to": 1.332}]}, {"name": "Technology", "weight": 0.034935, "members": [{"t": "FPT", "fcap": 105208, "to": 0.482}, {"t": "CMG", "fcap": 2171, "to": 0.144}]}, {"name": "Travel & Leisure", "weight": 0.018255, "members": [{"t": "VJC", "fcap": 33917, "to": 0.921}, {"t": "VPL", "fcap": 22192, "to": 0.228}]}, {"name": "Logistics", "weight": 0.01477, "members": [{"t": "GMD", "fcap": 30844, "to": 0.542}, {"t": "PVT", "fcap": 5505, "to": 1.622}, {"t": "VSC", "fcap": 4890, "to": 3.689}, {"t": "VTP", "fcap": 4159, "to": 1.283}]}, {"name": "Food - Agriculture", "weight": 0.013747, "members": [{"t": "SBT", "fcap": 12400, "to": 0.582}, {"t": "HAG", "fcap": 8840, "to": 0.319}, {"t": "BAF", "fcap": 8198, "to": 1.127}, {"t": "DBC", "fcap": 5054, "to": 0.877}, {"t": "VHC", "fcap": 4373, "to": 0.495}, {"t": "PAN", "fcap": 2087, "to": 0.678}, {"t": "ANV", "fcap": 1302, "to": 0.658}]}, {"name": "Utilities", "weight": 0.010531, "members": [{"t": "GAS", "fcap": 10183, "to": 1.37}, {"t": "REE", "fcap": 9960, "to": 0.135}, {"t": "POW", "fcap": 7823, "to": 2.009}, {"t": "BWE", "fcap": 2636, "to": 0.172}, {"t": "NT2", "fcap": 1766, "to": 0.798}]}, {"name": "Construction Contractors", "weight": 0.010456, "members": [{"t": "CII", "fcap": 9193, "to": 1.458}, {"t": "VCG", "fcap": 5971, "to": 0.544}, {"t": "PC1", "fcap": 5046, "to": 0.65}, {"t": "HHV", "fcap": 4844, "to": 0.603}, {"t": "CTD", "fcap": 3758, "to": 0.419}, {"t": "CTR", "fcap": 3327, "to": 0.728}]}, {"name": "Real Estate - Commercial", "weight": 0.010117, "members": [{"t": "VRE", "fcap": 23814, "to": 0.634}, {"t": "TCH", "fcap": 7284, "to": 0.996}]}, {"name": "Industrial", "weight": 0.009084, "members": [{"t": "GEX", "fcap": 22486, "to": 1.444}, {"t": "GEE", "fcap": 5434, "to": 1.859}]}, {"name": "Oil & Gas", "weight": 0.007811, "members": [{"t": "BSR", "fcap": 10816, "to": 2.372}, {"t": "PVD", "fcap": 8651, "to": 1.772}, {"t": "PLX", "fcap": 4542, "to": 3.361}]}, {"name": "Real Estate - Industrial", "weight": 0.007678, "members": [{"t": "KBC", "fcap": 16528, "to": 0.312}, {"t": "SIP", "fcap": 5317, "to": 0.105}, {"t": "BCM", "fcap": 1755, "to": 2.605}]}, {"name": "Chemicals", "weight": 0.006044, "members": [{"t": "DPM", "fcap": 6215, "to": 1.055}, {"t": "GVR", "fcap": 5088, "to": 1.678}, {"t": "DCM", "fcap": 4334, "to": 2.074}, {"t": "PHR", "fcap": 2940, "to": 0.947}]}, {"name": "Building Materials", "weight": 0.00277, "members": [{"t": "BMP", "fcap": 5198, "to": 0.209}, {"t": "VGC", "fcap": 2152, "to": 0.792}, {"t": "HT1", "fcap": 1164, "to": 0.374}]}, {"name": "Insurance", "weight": 0.001521, "members": [{"t": "BVH", "fcap": 4677, "to": 0.664}]}], "2026-09-09": [{"name": "Banks - Private", "weight": 0.3105, "members": [{"t": "STB", "fcap": 137366, "to": 0.268}, {"t": "LPB", "fcap": 129454, "to": 0.167}, {"t": "TCB", "fcap": 126277, "to": 0.545}, {"t": "VPB", "fcap": 119564, "to": 0.423}, {"t": "ACB", "fcap": 110763, "to": 0.167}, {"t": "HDB", "fcap": 110116, "to": 0.398}, {"t": "SHB", "fcap": 47091, "to": 1.374}, {"t": "MSB", "fcap": 33808, "to": 0.933}, {"t": "SSB", "fcap": 33769, "to": 0.369}, {"t": "VIB", "fcap": 28083, "to": 0.517}, {"t": "EIB", "fcap": 24960, "to": 0.52}, {"t": "TPB", "fcap": 22047, "to": 0.427}, {"t": "NAB", "fcap": 19429, "to": 0.103}, {"t": "OCB", "fcap": 9325, "to": 0.59}]}, {"name": "Real Estate - Residential", "weight": 0.27884, "members": [{"t": "VIC", "fcap": 576808, "to": 0.244}, {"t": "VHM", "fcap": 177687, "to": 0.336}, {"t": "NVL", "fcap": 17175, "to": 1.108}, {"t": "SJS", "fcap": 13517, "to": 0.192}, {"t": "KDH", "fcap": 12400, "to": 0.79}, {"t": "DXG", "fcap": 11464, "to": 1.195}, {"t": "VPI", "fcap": 10333, "to": 1.464}, {"t": "NLG", "fcap": 9799, "to": 0.674}, {"t": "DIG", "fcap": 8221, "to": 0.881}, {"t": "PDR", "fcap": 7184, "to": 0.91}, {"t": "HDG", "fcap": 3956, "to": 0.526}, {"t": "TAL", "fcap": 3523, "to": 0.114}, {"t": "KOS", "fcap": 2914, "to": 0.796}]}, {"name": "Banks - State", "weight": 0.067967, "members": [{"t": "MBB", "fcap": 101694, "to": 0.25}, {"t": "VCB", "fcap": 53953, "to": 0.534}, {"t": "CTG", "fcap": 35767, "to": 0.68}, {"t": "BID", "fcap": 16988, "to": 0.838}]}, {"name": "Financial Services", "weight": 0.064173, "members": [{"t": "SSI", "fcap": 43909, "to": 1.171}, {"t": "VIX", "fcap": 34990, "to": 1.929}, {"t": "HCM", "fcap": 19564, "to": 1.14}, {"t": "VCI", "fcap": 18320, "to": 1.243}, {"t": "VCK", "fcap": 18171, "to": 0.374}, {"t": "VND", "fcap": 18096, "to": 1.022}, {"t": "TCX", "fcap": 16647, "to": 0.488}, {"t": "VPX", "fcap": 9262, "to": 0.522}, {"t": "EVF", "fcap": 8634, "to": 0.251}, {"t": "DSE", "fcap": 3342, "to": 0.37}, {"t": "FTS", "fcap": 3263, "to": 0.59}, {"t": "CTS", "fcap": 1497, "to": 2.583}, {"t": "BSI", "fcap": 1069, "to": 1.038}]}, {"name": "Food - Staples & Beverage", "weight": 0.052512, "members": [{"t": "MSN", "fcap": 59934, "to": 0.504}, {"t": "VNM", "fcap": 51246, "to": 0.491}, {"t": "MCH", "fcap": 37130, "to": 0.169}, {"t": "KDC", "fcap": 6404, "to": 2.043}, {"t": "SAB", "fcap": 6299, "to": 0.62}]}, {"name": "Steel", "weight": 0.039678, "members": [{"t": "HPG", "fcap": 111700, "to": 0.394}, {"t": "HSG", "fcap": 5990, "to": 0.381}, {"t": "NKG", "fcap": 3969, "to": 0.414}]}, {"name": "Consumer Retail", "weight": 0.037729, "members": [{"t": "MWG", "fcap": 79249, "to": 0.375}, {"t": "PNJ", "fcap": 17478, "to": 1.179}, {"t": "FRT", "fcap": 13818, "to": 0.739}, {"t": "DGW", "fcap": 5141, "to": 1.323}]}, {"name": "Technology", "weight": 0.035109, "members": [{"t": "FPT", "fcap": 105500, "to": 0.483}, {"t": "CMG", "fcap": 2152, "to": 0.148}]}, {"name": "Travel & Leisure", "weight": 0.01851, "members": [{"t": "VJC", "fcap": 33648, "to": 0.892}, {"t": "VPL", "fcap": 23107, "to": 0.249}]}, {"name": "Logistics", "weight": 0.014803, "members": [{"t": "GMD", "fcap": 31090, "to": 0.525}, {"t": "PVT", "fcap": 5428, "to": 1.739}, {"t": "VSC", "fcap": 4801, "to": 3.666}, {"t": "VTP", "fcap": 4070, "to": 1.32}]}, {"name": "Food - Agriculture", "weight": 0.013804, "members": [{"t": "SBT", "fcap": 12509, "to": 0.583}, {"t": "HAG", "fcap": 8840, "to": 0.321}, {"t": "BAF", "fcap": 8198, "to": 1.1}, {"t": "DBC", "fcap": 5009, "to": 0.876}, {"t": "VHC", "fcap": 4365, "to": 0.477}, {"t": "PAN", "fcap": 2104, "to": 0.683}, {"t": "ANV", "fcap": 1302, "to": 0.66}]}, {"name": "Utilities", "weight": 0.010627, "members": [{"t": "GAS", "fcap": 10339, "to": 1.419}, {"t": "REE", "fcap": 9906, "to": 0.134}, {"t": "POW", "fcap": 7915, "to": 1.938}, {"t": "BWE", "fcap": 2642, "to": 0.111}, {"t": "NT2", "fcap": 1783, "to": 0.795}]}, {"name": "Construction Contractors", "weight": 0.010459, "members": [{"t": "CII", "fcap": 9161, "to": 1.473}, {"t": "VCG", "fcap": 5952, "to": 0.557}, {"t": "PC1", "fcap": 5108, "to": 0.639}, {"t": "HHV", "fcap": 4825, "to": 0.61}, {"t": "CTD", "fcap": 3696, "to": 0.418}, {"t": "CTR", "fcap": 3327, "to": 0.691}]}, {"name": "Real Estate - Commercial", "weight": 0.010191, "members": [{"t": "VRE", "fcap": 23905, "to": 0.611}, {"t": "TCH", "fcap": 7344, "to": 0.997}]}, {"name": "Industrial", "weight": 0.009188, "members": [{"t": "GEX", "fcap": 22532, "to": 1.366}, {"t": "GEE", "fcap": 5640, "to": 1.764}]}, {"name": "Oil & Gas", "weight": 0.007878, "members": [{"t": "BSR", "fcap": 10956, "to": 2.478}, {"t": "PVD", "fcap": 8651, "to": 1.748}, {"t": "PLX", "fcap": 4549, "to": 3.5}]}, {"name": "Real Estate - Industrial", "weight": 0.007679, "members": [{"t": "KBC", "fcap": 16497, "to": 0.358}, {"t": "SIP", "fcap": 5339, "to": 0.105}, {"t": "BCM", "fcap": 1710, "to": 2.709}]}, {"name": "Chemicals", "weight": 0.006043, "members": [{"t": "DPM", "fcap": 6201, "to": 1.078}, {"t": "GVR", "fcap": 5096, "to": 1.688}, {"t": "DCM", "fcap": 4321, "to": 2.136}, {"t": "PHR", "fcap": 2912, "to": 0.986}]}, {"name": "Building Materials", "weight": 0.002771, "members": [{"t": "BMP", "fcap": 5165, "to": 0.2}, {"t": "VGC", "fcap": 2179, "to": 0.758}, {"t": "HT1", "fcap": 1154, "to": 0.374}]}, {"name": "Insurance", "weight": 0.001537, "members": [{"t": "BVH", "fcap": 4714, "to": 0.666}]}], "2026-09-10": [{"name": "Banks - Private", "weight": 0.310563, "members": [{"t": "STB", "fcap": 139694, "to": 0.265}, {"t": "LPB", "fcap": 129454, "to": 0.159}, {"t": "TCB", "fcap": 126277, "to": 0.528}, {"t": "VPB", "fcap": 120001, "to": 0.412}, {"t": "ACB", "fcap": 110516, "to": 0.162}, {"t": "HDB", "fcap": 109916, "to": 0.403}, {"t": "SHB", "fcap": 47091, "to": 1.36}, {"t": "SSB", "fcap": 34341, "to": 0.413}, {"t": "MSB", "fcap": 33939, "to": 0.912}, {"t": "VIB", "fcap": 28086, "to": 0.491}, {"t": "EIB", "fcap": 25109, "to": 0.505}, {"t": "TPB", "fcap": 22047, "to": 0.422}, {"t": "NAB", "fcap": 19429, "to": 0.116}, {"t": "OCB", "fcap": 9371, "to": 0.584}]}, {"name": "Real Estate - Residential", "weight": 0.278761, "members": [{"t": "VIC", "fcap": 576808, "to": 0.244}, {"t": "VHM", "fcap": 180151, "to": 0.343}, {"t": "NVL", "fcap": 16977, "to": 1.063}, {"t": "SJS", "fcap": 13517, "to": 0.191}, {"t": "KDH", "fcap": 12400, "to": 0.787}, {"t": "DXG", "fcap": 11413, "to": 1.176}, {"t": "VPI", "fcap": 10808, "to": 1.425}, {"t": "NLG", "fcap": 9624, "to": 0.684}, {"t": "DIG", "fcap": 8221, "to": 0.859}, {"t": "PDR", "fcap": 7184, "to": 0.901}, {"t": "HDG", "fcap": 3943, "to": 0.531}, {"t": "TAL", "fcap": 3500, "to": 0.112}, {"t": "KOS", "fcap": 2905, "to": 0.909}]}, {"name": "Banks - State", "weight": 0.067614, "members": [{"t": "MBB", "fcap": 101191, "to": 0.249}, {"t": "VCB", "fcap": 54228, "to": 0.509}, {"t": "CTG", "fcap": 35592, "to": 0.646}, {"t": "BID", "fcap": 16964, "to": 0.768}]}, {"name": "Financial Services", "weight": 0.064201, "members": [{"t": "SSI", "fcap": 44119, "to": 1.154}, {"t": "VIX", "fcap": 35504, "to": 1.857}, {"t": "HCM", "fcap": 19527, "to": 1.113}, {"t": "VCI", "fcap": 18407, "to": 1.229}, {"t": "VCK", "fcap": 18323, "to": 0.372}, {"t": "VND", "fcap": 18096, "to": 1.046}, {"t": "TCX", "fcap": 16480, "to": 0.489}, {"t": "VPX", "fcap": 9281, "to": 0.326}, {"t": "EVF", "fcap": 8562, "to": 0.253}, {"t": "DSE", "fcap": 3342, "to": 0.371}, {"t": "FTS", "fcap": 3263, "to": 0.591}, {"t": "CTS", "fcap": 1514, "to": 2.525}, {"t": "BSI", "fcap": 1058, "to": 1.035}]}, {"name": "Food - Staples & Beverage", "weight": 0.052522, "members": [{"t": "MSN", "fcap": 60197, "to": 0.502}, {"t": "VNM", "fcap": 51497, "to": 0.42}, {"t": "MCH", "fcap": 37130, "to": 0.168}, {"t": "KDC", "fcap": 6404, "to": 1.794}, {"t": "SAB", "fcap": 6328, "to": 0.575}]}, {"name": "Steel", "weight": 0.039192, "members": [{"t": "HPG", "fcap": 110687, "to": 0.397}, {"t": "HSG", "fcap": 5933, "to": 0.388}, {"t": "NKG", "fcap": 3932, "to": 0.408}]}, {"name": "Consumer Retail", "weight": 0.038215, "members": [{"t": "MWG", "fcap": 80687, "to": 0.367}, {"t": "PNJ", "fcap": 17593, "to": 1.149}, {"t": "FRT", "fcap": 13769, "to": 0.768}, {"t": "DGW", "fcap": 5497, "to": 1.397}]}, {"name": "Technology", "weight": 0.036013, "members": [{"t": "FPT", "fcap": 108560, "to": 0.498}, {"t": "CMG", "fcap": 2212, "to": 0.149}]}, {"name": "Travel & Leisure", "weight": 0.018302, "members": [{"t": "VJC", "fcap": 33702, "to": 0.883}, {"t": "VPL", "fcap": 22596, "to": 0.258}]}, {"name": "Logistics", "weight": 0.014782, "members": [{"t": "GMD", "fcap": 30926, "to": 0.523}, {"t": "PVT", "fcap": 5621, "to": 1.843}, {"t": "VSC", "fcap": 4819, "to": 3.619}, {"t": "VTP", "fcap": 4102, "to": 1.307}]}, {"name": "Food - Agriculture", "weight": 0.013746, "members": [{"t": "SBT", "fcap": 12536, "to": 0.735}, {"t": "HAG", "fcap": 8840, "to": 0.326}, {"t": "BAF", "fcap": 8223, "to": 1.087}, {"t": "DBC", "fcap": 4979, "to": 0.883}, {"t": "VHC", "fcap": 4323, "to": 0.474}, {"t": "PAN", "fcap": 2087, "to": 0.726}, {"t": "ANV", "fcap": 1294, "to": 0.647}]}, {"name": "Utilities", "weight": 0.010546, "members": [{"t": "GAS", "fcap": 10207, "to": 1.411}, {"t": "REE", "fcap": 9928, "to": 0.13}, {"t": "POW", "fcap": 7884, "to": 1.877}, {"t": "BWE", "fcap": 2623, "to": 0.067}, {"t": "NT2", "fcap": 1796, "to": 0.713}]}, {"name": "Construction Contractors", "weight": 0.010297, "members": [{"t": "CII", "fcap": 8969, "to": 1.515}, {"t": "VCG", "fcap": 5933, "to": 0.556}, {"t": "PC1", "fcap": 5046, "to": 0.638}, {"t": "HHV", "fcap": 4795, "to": 0.611}, {"t": "CTD", "fcap": 3629, "to": 0.431}, {"t": "CTR", "fcap": 3300, "to": 0.652}]}, {"name": "Real Estate - Commercial", "weight": 0.010184, "members": [{"t": "VRE", "fcap": 24041, "to": 0.597}, {"t": "TCH", "fcap": 7284, "to": 0.994}]}, {"name": "Industrial", "weight": 0.009322, "members": [{"t": "GEX", "fcap": 22944, "to": 1.313}, {"t": "GEE", "fcap": 5730, "to": 1.745}]}, {"name": "Oil & Gas", "weight": 0.007786, "members": [{"t": "BSR", "fcap": 10856, "to": 2.385}, {"t": "PVD", "fcap": 8582, "to": 1.722}, {"t": "PLX", "fcap": 4511, "to": 3.4}]}, {"name": "Real Estate - Industrial", "weight": 0.007657, "members": [{"t": "KBC", "fcap": 16528, "to": 0.352}, {"t": "SIP", "fcap": 5339, "to": 0.103}, {"t": "BCM", "fcap": 1685, "to": 2.646}]}, {"name": "Chemicals", "weight": 0.005977, "members": [{"t": "DPM", "fcap": 6147, "to": 1.07}, {"t": "GVR", "fcap": 5072, "to": 1.666}, {"t": "DCM", "fcap": 4301, "to": 2.111}, {"t": "PHR", "fcap": 2864, "to": 1.001}]}, {"name": "Building Materials", "weight": 0.0028, "members": [{"t": "BMP", "fcap": 5231, "to": 0.196}, {"t": "VGC", "fcap": 2233, "to": 0.752}, {"t": "HT1", "fcap": 1150, "to": 0.205}]}, {"name": "Insurance", "weight": 0.00152, "members": [{"t": "BVH", "fcap": 4677, "to": 0.598}]}], "2026-09-11": [{"name": "Banks - Private", "weight": 0.311307, "members": [{"t": "STB", "fcap": 138441, "to": 0.281}, {"t": "LPB", "fcap": 125555, "to": 0.165}, {"t": "TCB", "fcap": 123159, "to": 0.518}, {"t": "VPB", "fcap": 117601, "to": 0.432}, {"t": "ACB", "fcap": 108789, "to": 0.161}, {"t": "HDB", "fcap": 107313, "to": 0.416}, {"t": "SHB", "fcap": 46290, "to": 1.342}, {"t": "SSB", "fcap": 34913, "to": 0.408}, {"t": "MSB", "fcap": 33939, "to": 0.88}, {"t": "VIB", "fcap": 27163, "to": 0.498}, {"t": "EIB", "fcap": 25035, "to": 0.508}, {"t": "TPB", "fcap": 21589, "to": 0.409}, {"t": "NAB", "fcap": 19343, "to": 0.116}, {"t": "OCB", "fcap": 9371, "to": 0.581}]}, {"name": "Real Estate - Residential", "weight": 0.27919, "members": [{"t": "VIC", "fcap": 566562, "to": 0.249}, {"t": "VHM", "fcap": 177440, "to": 0.348}, {"t": "NVL", "fcap": 16118, "to": 1.12}, {"t": "SJS", "fcap": 13470, "to": 0.192}, {"t": "KDH", "fcap": 11890, "to": 0.832}, {"t": "DXG", "fcap": 10906, "to": 1.251}, {"t": "VPI", "fcap": 10491, "to": 1.446}, {"t": "NLG", "fcap": 9586, "to": 0.769}, {"t": "DIG", "fcap": 8060, "to": 0.868}, {"t": "PDR", "fcap": 7035, "to": 0.921}, {"t": "HDG", "fcap": 3895, "to": 0.529}, {"t": "TAL", "fcap": 3349, "to": 0.118}, {"t": "KOS", "fcap": 2879, "to": 0.906}]}, {"name": "Banks - State", "weight": 0.06781, "members": [{"t": "MBB", "fcap": 99429, "to": 0.245}, {"t": "VCB", "fcap": 53493, "to": 0.524}, {"t": "CTG", "fcap": 34893, "to": 0.673}, {"t": "BID", "fcap": 16614, "to": 0.801}]}, {"name": "Financial Services", "weight": 0.063069, "members": [{"t": "SSI", "fcap": 42649, "to": 1.193}, {"t": "VIX", "fcap": 34089, "to": 1.939}, {"t": "HCM", "fcap": 18933, "to": 1.135}, {"t": "VCK", "fcap": 17653, "to": 0.386}, {"t": "VCI", "fcap": 17327, "to": 1.363}, {"t": "VND", "fcap": 17297, "to": 1.106}, {"t": "TCX", "fcap": 15856, "to": 0.526}, {"t": "VPX", "fcap": 9000, "to": 0.283}, {"t": "EVF", "fcap": 8454, "to": 0.251}, {"t": "DSE", "fcap": 3268, "to": 0.378}, {"t": "FTS", "fcap": 3133, "to": 0.626}, {"t": "CTS", "fcap": 1463, "to": 2.617}, {"t": "BSI", "fcap": 1013, "to": 1.076}]}, {"name": "Food - Staples & Beverage", "weight": 0.052406, "members": [{"t": "MSN", "fcap": 58269, "to": 0.524}, {"t": "VNM", "fcap": 50075, "to": 0.435}, {"t": "MCH", "fcap": 37078, "to": 0.168}, {"t": "KDC", "fcap": 6379, "to": 1.564}, {"t": "SAB", "fcap": 6186, "to": 0.53}]}, {"name": "Steel", "weight": 0.038953, "members": [{"t": "HPG", "fcap": 107901, "to": 0.412}, {"t": "HSG", "fcap": 5764, "to": 0.406}, {"t": "NKG", "fcap": 3766, "to": 0.415}]}, {"name": "Consumer Retail", "weight": 0.038154, "members": [{"t": "MWG", "fcap": 78917, "to": 0.374}, {"t": "PNJ", "fcap": 17179, "to": 1.273}, {"t": "FRT", "fcap": 13474, "to": 0.766}, {"t": "DGW", "fcap": 5454, "to": 1.506}]}, {"name": "Technology", "weight": 0.035861, "members": [{"t": "FPT", "fcap": 105937, "to": 0.516}, {"t": "CMG", "fcap": 2175, "to": 0.148}]}, {"name": "Travel & Leisure", "weight": 0.018496, "members": [{"t": "VJC", "fcap": 33567, "to": 0.878}, {"t": "VPL", "fcap": 22192, "to": 0.268}]}, {"name": "Logistics", "weight": 0.014931, "members": [{"t": "GMD", "fcap": 30679, "to": 0.498}, {"t": "PVT", "fcap": 5712, "to": 1.895}, {"t": "VSC", "fcap": 4623, "to": 3.713}, {"t": "VTP", "fcap": 3997, "to": 1.338}]}, {"name": "Food - Agriculture", "weight": 0.013797, "members": [{"t": "SBT", "fcap": 12454, "to": 0.739}, {"t": "HAG", "fcap": 8618, "to": 0.331}, {"t": "BAF", "fcap": 8185, "to": 1.086}, {"t": "DBC", "fcap": 4828, "to": 0.92}, {"t": "VHC", "fcap": 4206, "to": 0.485}, {"t": "PAN", "fcap": 2053, "to": 0.732}, {"t": "ANV", "fcap": 1250, "to": 0.677}]}, {"name": "Utilities", "weight": 0.010591, "members": [{"t": "GAS", "fcap": 10002, "to": 1.386}, {"t": "REE", "fcap": 9808, "to": 0.135}, {"t": "POW", "fcap": 7731, "to": 1.836}, {"t": "BWE", "fcap": 2617, "to": 0.069}, {"t": "NT2", "fcap": 1770, "to": 0.727}]}, {"name": "Construction Contractors", "weight": 0.010222, "members": [{"t": "CII", "fcap": 8459, "to": 1.651}, {"t": "VCG", "fcap": 5779, "to": 0.597}, {"t": "PC1", "fcap": 5034, "to": 0.64}, {"t": "HHV", "fcap": 4659, "to": 0.628}, {"t": "CTD", "fcap": 3567, "to": 0.44}, {"t": "CTR", "fcap": 3318, "to": 0.615}]}, {"name": "Real Estate - Commercial", "weight": 0.010055, "members": [{"t": "VRE", "fcap": 23269, "to": 0.61}, {"t": "TCH", "fcap": 7043, "to": 1.072}]}, {"name": "Industrial", "weight": 0.009121, "members": [{"t": "GEX", "fcap": 21937, "to": 1.32}, {"t": "GEE", "fcap": 5560, "to": 1.787}]}, {"name": "Oil & Gas", "weight": 0.007999, "members": [{"t": "BSR", "fcap": 11036, "to": 2.402}, {"t": "PVD", "fcap": 8605, "to": 1.755}, {"t": "PLX", "fcap": 4472, "to": 3.415}]}, {"name": "Real Estate - Industrial", "weight": 0.007667, "members": [{"t": "KBC", "fcap": 16222, "to": 0.357}, {"t": "SIP", "fcap": 5284, "to": 0.098}, {"t": "BCM", "fcap": 1608, "to": 2.807}]}, {"name": "Chemicals", "weight": 0.005969, "members": [{"t": "DPM", "fcap": 6092, "to": 1.089}, {"t": "GVR", "fcap": 4800, "to": 1.686}, {"t": "DCM", "fcap": 4301, "to": 2.214}, {"t": "PHR", "fcap": 2800, "to": 1.056}]}, {"name": "Building Materials", "weight": 0.002829, "members": [{"t": "BMP", "fcap": 5168, "to": 0.196}, {"t": "VGC", "fcap": 2206, "to": 0.692}, {"t": "HT1", "fcap": 1154, "to": 0.212}]}, {"name": "Insurance", "weight": 0.001576, "members": [{"t": "BVH", "fcap": 4751, "to": 0.606}]}]}, "portfolios": [{"name": "hsc_strat_high_growth", "statement": {"approach": "", "scope": "", "holdings": {"min": 20, "max": 30}, "rebalance": {"frequency": "1Q", "drift_threshold": 0.05}, "screens": {"turnover": {"on": false, "min_pct": 0.1}, "float_cap": {"on": false, "min_bn_vnd": 1000}}}, "cap": {"sector_cap": "no", "max_weight": 0.25}, "tactical": null, "book": {"Banks - Private": {"mult": "AV", "rating": "AV", "kept": ["ACB", "HDB", "TCB", "VPB"]}, "Banks - State": {"mult": "UW", "rating": "UW", "kept": ["CTG"]}, "Building Materials": {"mult": "NO", "rating": "NO", "kept": ["BMP", "HT1", "VGC"]}, "Chemicals": {"mult": "NO", "rating": "NO", "kept": ["DCM", "DPM", "GVR", "PHR"]}, "Construction Contractors": {"mult": "AV", "rating": "AV", "kept": ["PC1"]}, "Consumer Retail": {"mult": "OW", "rating": "OW", "kept": ["DGW", "MWG"]}, "Financial Services": {"mult": "AV", "rating": "AV", "kept": ["HCM", "TCX"]}, "Food - Agriculture": {"mult": "NO", "rating": "NO", "kept": ["ANV", "BAF", "DBC", "HAG", "PAN", "SBT", "VHC"]}, "Food - Staples & Beverage": {"mult": "NO", "rating": "NO", "kept": ["KDC", "MCH", "MSN", "SAB", "VNM"]}, "Industrial": {"mult": "NO", "rating": "NO", "kept": ["GEE", "GEX"]}, "Insurance": {"mult": "NO", "rating": "NO", "kept": ["BVH"]}, "Logistics": {"mult": "AV", "rating": "AV", "kept": ["GMD", "PVT", "VSC", "VTP"]}, "Oil & Gas": {"mult": "NO", "rating": "NO", "kept": ["BSR", "PLX", "PVD"]}, "Real Estate - Commercial": {"mult": "NO", "rating": "NO", "kept": ["TCH", "VRE"]}, "Real Estate - Industrial": {"mult": "NO", "rating": "NO", "kept": ["BCM", "KBC", "SIP"]}, "Real Estate - Residential": {"mult": "0.5", "rating": "UW", "kept": ["NVL", "VHM"]}, "Steel": {"mult": "AV", "rating": "AV", "kept": ["HPG"]}, "Technology": {"mult": "NO", "rating": "NO", "kept": ["CMG", "FPT"]}, "Travel & Leisure": {"mult": "NO", "rating": "NO", "kept": ["VJC", "VPL"]}, "Utilities": {"mult": "NO", "rating": "NO", "kept": ["BWE", "GAS", "NT2", "POW", "REE"]}}}, {"name": "hsc_strat_soe_dom", "statement": {"approach": "", "scope": "", "holdings": {"min": 20, "max": 30}, "rebalance": {"frequency": "1Q", "drift_threshold": 0.05}, "screens": {"turnover": {"on": false, "min_pct": 0.1}, "float_cap": {"on": false, "min_bn_vnd": 1000}}}, "cap": {"sector_cap": "No", "max_weight": 0.2}, "tactical": {"tactical_group": "no"}, "book": {"Banks - Private": {"mult": "AV", "rating": "AV", "kept": ["ACB", "EIB", "HDB", "LPB", "MSB", "NAB", "OCB", "SHB", "SSB", "STB", "TCB", "TPB", "VIB", "VPB"]}, "Banks - State": {"mult": "AV", "rating": "AV", "kept": ["BID", "CTG", "MBB", "VCB"]}, "Building Materials": {"mult": "AV", "rating": "AV", "kept": ["BMP", "HT1", "VGC"]}, "Chemicals": {"mult": "AV", "rating": "AV", "kept": ["DCM", "DPM", "GVR", "PHR"]}, "Construction Contractors": {"mult": "AV", "rating": "AV", "kept": ["CII", "CTD", "CTR", "HHV", "PC1", "VCG"]}, "Consumer Retail": {"mult": "AV", "rating": "AV", "kept": ["DGW", "FRT", "MWG", "PNJ"]}, "Financial Services": {"mult": "AV", "rating": "AV", "kept": ["BSI", "CTS", "DSE", "EVF", "FTS", "HCM", "SSI", "TCX", "VCI", "VCK", "VIX", "VND", "VPX"]}, "Food - Agriculture": {"mult": "AV", "rating": "AV", "kept": ["ANV", "BAF", "DBC", "HAG", "PAN", "SBT", "VHC"]}, "Food - Staples & Beverage": {"mult": "AV", "rating": "AV", "kept": ["KDC", "MCH", "MSN", "SAB", "VNM"]}, "Industrial": {"mult": "AV", "rating": "AV", "kept": ["GEE", "GEX"]}, "Insurance": {"mult": "AV", "rating": "AV", "kept": ["BVH"]}, "Logistics": {"mult": "AV", "rating": "AV", "kept": ["GMD", "PVT", "VSC", "VTP"]}, "Oil & Gas": {"mult": "AV", "rating": "AV", "kept": ["BSR", "PLX", "PVD"]}, "Real Estate - Commercial": {"mult": "AV", "rating": "AV", "kept": ["TCH", "VRE"]}, "Real Estate - Industrial": {"mult": "AV", "rating": "AV", "kept": ["BCM", "KBC", "SIP"]}, "Real Estate - Residential": {"mult": "AV", "rating": "AV", "kept": ["DIG", "DXG", "HDG", "KDH", "KOS", "NLG", "NVL", "PDR", "SJS", "TAL", "VHM", "VIC", "VPI"]}, "Steel": {"mult": "AV", "rating": "AV", "kept": ["HPG", "HSG", "NKG"]}, "Technology": {"mult": "AV", "rating": "AV", "kept": ["CMG", "FPT"]}, "Travel & Leisure": {"mult": "AV", "rating": "AV", "kept": ["VJC", "VPL"]}, "Utilities": {"mult": "AV", "rating": "AV", "kept": ["BWE", "GAS", "NT2", "POW", "REE"]}}}]};
+const DEF = {NO:0, UW:0.75, AV:1, OW:1.25};
+const FREQ = {"2W":"Every 2 weeks","1M":"Monthly","1Q":"Quarterly"};
+const EPS = 1e-12;
+const STEPS = [
+  {k:"statement", t:"Statement", s:"Mandate and range"},
+  {k:"fork", t:"Fork", s:"Anchor and baseline"},
+  {k:"screen", t:"Screen", s:"Invalidate names", opt:true},
+  {k:"book", t:"Book", s:"Investable universe"},
+  {k:"constraints", t:"Constraints", s:"Caps", opt:true},
+  {k:"target", t:"Target", s:"Allocation"},
+];
+
+/* ---------- universe per anchor ---------- */
+const UNI = {};
+for (const [a, groups] of Object.entries(DATA.anchors)){
+  const u = {anchor:a, groups, FC:{}, HOME:{}, TO:{}, total:0, byName:{}};
+  groups.forEach(g => { u.byName[g.name] = g; g.members.forEach(m => { u.FC[m.t]=m.fcap; u.HOME[m.t]=g.name; u.TO[m.t]=m.to; u.total+=m.fcap; }); });
+  UNI[a] = u;
+}
+const ELIGIBLE = DATA.sessions.slice(20);           // 21 sessions of history behind it
+
+/* ---------- model ---------- */
+const uni = P => UNI[P.forked.anchor];
+function fromExport(p){
+  const u = UNI[DATA.anchor];
+  const book = {};
+  u.groups.forEach(g => {
+    const b = p.book[g.name] || {rating:"AV", mult:"AV", kept:g.members.map(m=>m.t)};
+    book[g.name] = {rating:b.rating, mult: isNaN(parseFloat(b.mult)) ? null : parseFloat(b.mult), included:new Set(b.kept), autoNo:false};
+  });
+  const tacGroups = p.name === "hsc_strat_soe_dom" ? [{name:"SOE Divestment", rating:"OW", mult:2, tickers:["GAS","BSR","PLX"]}] : [];
+  const P = {
+    name:p.name, statement: structuredClone(p.statement), book, invalid:new Set(),
+    tac:{on: !!(p.tactical && p.tactical.tactical_group === "yes"), groups:tacGroups},
+    cons:{sector:{on:p.cap.sector_cap==="yes", mode:"universal", max:p.cap.max_weight, per:{}},
+          ucits:{on:false, T:0.05, L:0.50}, stock:{on:false, max:0.10}},
+    forked:{at:"2026-09-14 12:53", anchor:DATA.anchor, lost: p.name==="hsc_strat_high_growth" ? [["Mining","OW","4"]] : []},
+    screenPicks:new Set(), built:null,
+  };
+  normalize(P);
+  return P;
+}
+function blankPortfolio(name, st){
+  const book = {}; UNI[DATA.anchor].groups.forEach(g => book[g.name] = {rating:"AV", mult:null, included:new Set(g.members.map(m=>m.t)), autoNo:false});
+  return {name, statement:st, book, invalid:new Set(), tac:{on:false, groups:[]},
+    cons:{sector:{on:false,mode:"universal",max:0.25,per:{}}, ucits:{on:false,T:0.05,L:0.5}, stock:{on:false,max:0.10}},
+    forked:{at:"2026-09-14 (now)", anchor:DATA.anchor, lost:[]}, screenPicks:new Set(), built:null};
+}
+const S = {
+  page:"data", port:null, step:0,
+  ports: Object.fromEntries(DATA.portfolios.map(p => [p.name, fromExport(p)])),
+  console:{ingest:null, params:null}, confirmDel:null,
+};
+function claims(P){ const c = {}; if (P.tac.on) P.tac.groups.forEach(tg => tg.tickers.forEach(t => { if (!P.invalid.has(t)) c[t] = tg.name; })); return c; }
+function survivors(P, g){ const c = claims(P); const bk = P.book[g.name]; return g.members.filter(m => bk.included.has(m.t) && !P.invalid.has(m.t) && !c[m.t]); }
+/* auto-NO: an empty investable box is NO; a name arriving in an auto-NO group makes it AV again */
+function normalize(P){
+  const u = uni(P);
+  u.groups.forEach(g => {
+    if (!P.book[g.name]) P.book[g.name] = {rating:"AV", mult:null, included:new Set(g.members.map(m=>m.t)), autoNo:false};
+    const bk = P.book[g.name]; const n = survivors(P, g).length;
+    if (n === 0 && bk.rating !== "NO"){ bk.rating = "NO"; bk.mult = null; bk.autoNo = true; }
+    else if (n > 0 && bk.autoNo){ bk.rating = "AV"; bk.autoNo = false; }
+  });
+  P.tac.groups.forEach(tg => tg.tickers = tg.tickers.filter(t => u.FC[t] && !P.invalid.has(t)));
+}
+function mult(r, m){ return m === null || m === undefined ? DEF[r] : m; }
+
+/* ---------- tilt ---------- */
+function tilt(P){
+  const u = uni(P); const errs = []; const c = claims(P);
+  const rows = [];
+  u.groups.forEach(g => {
+    const bk = P.book[g.name];
+    const migrated = g.members.filter(m => c[m.t]).reduce((a,m)=>a+m.fcap,0)/u.total;
+    rows.push({group:g.name, kind:"sector", rating:bk.rating, m:mult(bk.rating, bk.mult), base:g.weight, b:g.weight - migrated, migrated, surv:survivors(P, g)});
+  });
+  if (P.tac.on) P.tac.groups.forEach(tg => {
+    const surv = tg.tickers.map(t => ({t, fcap:u.FC[t]}));
+    rows.push({group:tg.name, kind:"tactical", rating:surv.length ? tg.rating : "NO", m:surv.length ? mult(tg.rating, tg.mult) : 0, base:0, b:surv.reduce((a,x)=>a+x.fcap,0)/u.total, migrated:0, surv});
+  });
+  const tot = rows.reduce((a,r)=>a + r.b*r.m, 0);
+  if (tot <= 0) errs.push("Every group is NO; nothing to allocate.");
+  rows.forEach(r => { r.unc = tot ? r.b*r.m/tot : 0; });
+  return {rows, errs};
+}
+
+/* ---------- constraint solver: clip and redistribute, within-group first ---------- */
+function solve(rows, cons){
+  const live = rows.filter(r => r.unc > 0);
+  const n = live.reduce((a,r)=>a+r.surv.length, 0);
+  const report = [];
+  const errs = [];
+  const capG = {};
+  if (cons.sector.on) live.forEach(r => { capG[r.group] = cons.sector.mode === "individual" ? (cons.sector.per[r.group] ?? cons.sector.max) : cons.sector.max; });
+  const ceil = cons.stock.on ? cons.stock.max : 1;
+  const T = cons.ucits.on ? cons.ucits.T : 1, L = cons.ucits.on ? cons.ucits.L : 1;
+  // pre-checks
+  if (cons.sector.on){ const s = live.reduce((a,r)=>a+capG[r.group],0); if (s < 1-1e-9) errs.push(`Sector caps sum to ${pct(s,0)} across ${live.length} live groups; they must reach 100%.`); }
+  if (cons.stock.on && ceil*n < 1-1e-9) errs.push(`Max per stock ${pct(ceil,0)} × ${n} names = ${pct(ceil*n,0)}; under 100%. Add names or raise the cap.`);
+  if (cons.ucits.on && T > L) errs.push("Large-holding threshold cannot exceed the aggregate cap.");
+  if (errs.length) return {stocks:[], errs, report, residual:0};
+
+  // stock state
+  const st = []; const gOf = {};
+  live.forEach(r => { const S = r.surv.reduce((a,x)=>a+x.fcap,0); r.surv.forEach(x => { st.push({t:x.t, g:r.group, w:r.unc*x.fcap/S, pin:null}); }); gOf[r.group] = r; });
+  const byG = g => st.filter(s => s.g === g);
+  const gw = g => byG(g).reduce((a,s)=>a+s.w,0);
+  const cOf = s => s.w > T + EPS ? ceil : Math.min(ceil, T);            // stop-at-T: a small name never crosses T
+  let residual = 0, iter = 0, moved = 1;
+  const pour = (targets, amt) => {                                       // pro-rata by weight, each stopping at its ceiling
+    let left = amt;
+    for (let k=0; k<20 && left > EPS; k++){
+      const open = targets.filter(s => s.w < cOf(s) - EPS);
+      if (!open.length) break;
+      const tw = open.reduce((a,s)=>a+s.w,0) || open.length;
+      let next = 0;
+      open.forEach(s => { const share = left * (tw === open.length ? 1/open.length : s.w/tw); const room = cOf(s) - s.w; const take = Math.min(share, room); s.w += take; next += share - take; });
+      left = next;
+    }
+    return left;
+  };
+  const groupRoom = g => cons.sector.on ? Math.max(0, capG[g] - gw(g)) : Infinity;   // a group never grows past its own cap
+  const smallOnly = s => !cons.ucits.on || s.w <= T + EPS;                            // stop-at-T: never pour into a large name
+  let stuck = false;
+  while (iter++ < 300 && moved > 1e-11 && !stuck){
+    moved = 0; let pool = 0;
+    // A. group caps: scale the group down, excess to the pool
+    if (cons.sector.on) live.forEach(r => { const w = gw(r.group), cap = capG[r.group]; if (w > cap + EPS){ const f = cap/w; byG(r.group).forEach(s => s.w *= f); pool += w - cap; moved += w - cap; r.capped = true; } });
+    // B. per-stock ceilings, excess stays in the group when it can
+    st.forEach(s => { const c = cOf(s); if (s.w > c + EPS){ const ex = s.w - c; s.w = c; s.pin = cons.stock.on && c === ceil ? "max" : "T"; moved += ex;
+      const part = Math.min(ex, groupRoom(s.g));
+      pool += ex - part + pour(byG(s.g).filter(x => x !== s && smallOnly(x)), part); } });
+    // C. UCITS aggregate on names above T; a name scaled under T stops at T and leaves the large set
+    if (cons.ucits.on){
+      const large = st.filter(s => s.w > T + EPS); const before = large.reduce((a,s)=>a+s.w,0);
+      if (before > L + EPS){
+        let cur = large.slice();
+        for (let k=0; k<50 && cur.length; k++){
+          const f = L / cur.reduce((a,s)=>a+s.w,0);
+          const drop = cur.filter(s => s.w*f < T);
+          if (!drop.length){ cur.forEach(s => s.w *= f); break; }
+          drop.forEach(s => { s.w = T; s.pin = "T"; }); cur = cur.filter(s => !drop.includes(s));
+        }
+        let ex = before - large.reduce((a,s)=>a+s.w,0); moved += ex;
+        [...new Set(large.map(s=>s.g))].forEach(g => { const part = Math.min(ex, groupRoom(g)); ex -= part - pour(byG(g).filter(smallOnly), part); });
+        pool += ex;
+      }
+    }
+    // spill across groups, pro-rata by group weight, until placed or nobody has room
+    for (let k=0; k<50 && pool > EPS; k++){
+      const rec = live.filter(r => groupRoom(r.group) > EPS && byG(r.group).some(s => smallOnly(s) && s.w < cOf(s) - EPS));
+      if (!rec.length) break;
+      const tw = rec.reduce((a,r)=>a+gw(r.group),0); let left = 0; const before = pool;
+      rec.forEach(r => { const share = before * gw(r.group)/tw; const give = Math.min(share, groupRoom(r.group)); left += share - give + pour(byG(r.group).filter(smallOnly), give); });
+      pool = left;
+    }
+    residual = pool;
+    if (residual > EPS) stuck = true;          // nothing left with room: report, do not loop forever
+  }
+  if (residual > 1e-9){
+    const large = st.filter(s => s.w > T + EPS).length;
+    const why = cons.ucits.on ? ` UCITS room: L ${pct(L,0)} + T ${pct(T,0)} × ${n - large} small names = ${pct(L + T*(n-large),0)}.` : "";
+    errs.push(`Constraints cannot place ${pct(residual,2)} of the book.${why} Raise a cap, or add names.`);
+  }
+  if (iter >= 300) errs.push("Solver did not settle in 300 passes; loosen a constraint.");
+  const capped = live.filter(r => r.capped).length;
+  report.push({k:"Sector cap", on:cons.sector.on, txt: !cons.sector.on ? "off" : capped ? `binding on ${capped} group${capped>1?"s":""}` : "not binding"});
+  const pm = st.filter(s => s.pin === "max").length;
+  report.push({k:"Max per stock", on:cons.stock.on, txt: !cons.stock.on ? "off" : pm ? `binding on ${pm} name${pm>1?"s":""}` : "not binding"});
+  const pt = st.filter(s => s.pin === "T").length; const lg = st.filter(s => s.w > T + EPS);
+  report.push({k:"Large holdings", on:cons.ucits.on, txt: !cons.ucits.on ? "off" : `${lg.length} above ${pct(T,0)} sum to ${pct(lg.reduce((a,s)=>a+s.w,0),1)}${pt ? `; ${pt} held at ${pct(T,0)}` : ""}`});
+  return {stocks:st, errs, report, residual};
+}
+
+function compute(P){
+  const u = uni(P);
+  const {rows, errs} = tilt(P);
+  const sol = errs.length ? {stocks:[], errs:[], report:[], residual:0} : solve(rows, P.cons);
+  const all = [...errs, ...sol.errs];
+  const w = {}; rows.forEach(r => { r.w = 0; });
+  if (!all.length){
+    sol.stocks.forEach(s => { w[s.t] = s.w; });
+    rows.forEach(r => { r.w = sol.stocks.filter(s=>s.g===r.group).reduce((a,s)=>a+s.w,0); });
+  } else rows.forEach(r => r.w = r.unc);
+  const holdings = sol.stocks.map(s => ({t:s.t, group:s.g, home:u.HOME[s.t], w:s.w, pin:s.pin})).sort((a,b)=>b.w-a.w);
+  rows.sort((a,b)=>b.w-a.w || b.base-a.base);
+  return {rows, holdings, errs:all, report:sol.report, n: rows.filter(r=>r.unc>0).reduce((a,r)=>a+r.surv.length,0)};
+}
+
+/* ---------- helpers ---------- */
+const $ = (s, el=document) => el.querySelector(s);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const pct = (x, d=2) => (x*100).toFixed(d) + "%";
+const bn = x => Math.round(x).toLocaleString("en-US");
+const id = s => s.replace(/\W+/g,"_");
+function rangePill(n, h){
+  if (n < h.min) return `<span class="pill warn">${n} below ${h.min}</span>`;
+  if (n > h.max) return `<span class="pill warn">${n} above ${h.max}</span>`;
+  return `<span class="pill ok">${n} in range</span>`;
+}
+function mandateText(r){
+  const a = [];
+  if (r.frequency) a.push(FREQ[r.frequency]);
+  if (r.drift_threshold !== null && r.drift_threshold !== undefined) a.push(`drift > ${pct(r.drift_threshold,0)}`);
+  return a.join(" or ");
+}
+function go(page, port=null, step=0){ S.page=page; if (port) S.port=port; S.step=step; S.confirmDel=null; render(); window.scrollTo({top:0}); }
+
+/* ---------- nav ---------- */
+function renderNav(){
+  const names = Object.keys(S.ports);
+  $("#nav").innerHTML = `
+    <div class="label">Workspace</div>
+    <button data-go="data" aria-current="${S.page==="data"}">Market data <span class="pill ok plain num" style="font-size:11px">${DATA.anchor.slice(5)}</span></button>
+    <button data-go="list" aria-current="${S.page==="list"||S.page==="new"}">Portfolios <span class="num" style="font-size:12px;color:var(--ink-3)">${names.length}</span></button>
+    ${names.map(n => `<button class="sub" data-port="${n}" aria-current="${S.page==="flow" && S.port===n}">${esc(n.replace("hsc_strat_",""))}</button>`).join("")}`;
+  $("#railAnchor").textContent = `sticky anchor ${DATA.anchor}`;
+  $("#nav").querySelectorAll("[data-go]").forEach(b => b.onclick = () => go(b.dataset.go));
+  $("#nav").querySelectorAll("[data-port]").forEach(b => b.onclick = () => go("flow", b.dataset.port, S.port===b.dataset.port ? S.step : 0));
+}
+
+/* ---------- page: data ---------- */
+function renderData(){
+  const u = UNI[DATA.anchor];
+  const med = Object.values(u.TO).sort((a,b)=>a-b)[50];
+  const log = k => S.console[k] ? `<div class="console" aria-live="polite">${S.console[k]}</div>` : "";
+  return `<div class="page">
+    <div class="head"><div><div class="crumbs">data/market.db</div><h1>Market data</h1></div>
+      <span class="pill ok">Params fresh for ${DATA.anchor}</span></div>
+    <div class="grid2">
+      <section class="panel">
+        <div class="panel-h"><h2>1 · Ingest FiinPro drops</h2><button class="btn primary" id="runIngest">Rebuild database</button></div>
+        <div class="panel-b" style="display:flex;flex-direction:column;gap:14px">
+          <dl class="kv">
+            <dt>Rows</dt><dd>${bn(DATA.market.rows)}</dd>
+            <dt>Tickers</dt><dd>${DATA.market.tickers} · HOSE 100</dd>
+            <dt>Sessions</dt><dd>${DATA.market.sessions} · ${DATA.sessions[0]} → ${DATA.sessions.at(-1)}</dd>
+            <dt>Rebuilt</dt><dd>2026-09-14 11:58</dd>
+          </dl>
+          <div class="scroll"><table>
+            <thead><tr><th>Drop in data/fiinpro/</th><th class="n">Rows</th><th class="n">Tickers</th><th>Range</th></tr></thead>
+            <tbody>${DATA.market.loads.map(l => `<tr><td class="mono">${esc(l[0])}</td><td class="n">${bn(+l[1])}</td><td class="n">${l[5]}</td><td class="mono">${l[3].slice(5)} → ${l[4].slice(5)}</td></tr>`).join("")}</tbody>
+          </table></div>
+          <p class="note">Drop new exports into <span class="mono">data/fiinpro/</span>. The database is rebuilt from scratch into a temp file and swapped in only if every drop validates.</p>
+        </div>
+        ${log("ingest")}
+      </section>
+      <section class="panel">
+        <div class="panel-h"><h2>2 · Parameters and baselines</h2><button class="btn primary" id="runParams">Recompute</button></div>
+        <div class="panel-b" style="display:flex;flex-direction:column;gap:14px">
+          <dl class="kv">
+            <dt>Sticky anchor</dt><dd>${DATA.anchor} · index/anchor_date.json</dd>
+            <dt>Built anchors</dt><dd>${Object.keys(DATA.anchors).map(a=>a.slice(5)).join(" · ")}</dd>
+            <dt>Grouping</dt><dd>group_map_live.csv · ${u.groups.length} groups</dd>
+            <dt>21d turnover</dt><dd>median ${med.toFixed(3)}% of float cap / day</dd>
+            <dt>FOL</dt><dd><span class="pill off">index/fol.csv empty, deferred</span></dd>
+          </dl>
+          <p class="note">One <span class="mono">params/&lt;anchor&gt;.csv</span> and one <span class="mono">baseline/&lt;anchor&gt;/</span> per anchor. Any session with 21 sessions behind it can be built; the Fork step asks for a build when a portfolio picks one that is missing.</p>
+        </div>
+        ${log("params")}
+      </section>
+    </div>
+    <section class="panel">
+      <div class="panel-h"><h2>3 · Baseline allocation, ${DATA.anchor}</h2><span class="label">free-float cap weight · ${u.groups.length} groups · 100 names</span></div>
+      <div class="scroll"><table>
+        <thead><tr><th>Group</th><th class="n">Names</th><th class="n">Float cap, bn VND</th><th class="n">Weight</th><th style="width:34%"></th></tr></thead>
+        <tbody>${u.groups.map(g => { const fc = g.members.reduce((a,m)=>a+m.fcap,0); return `<tr>
+          <td>${esc(g.name)}</td><td class="n">${g.members.length}</td><td class="n">${bn(fc)}</td><td class="n">${pct(g.weight)}</td>
+          <td><div class="bar"><div class="t" style="width:${g.weight/0.32*100}%;background:var(--accent)"></div></div></td></tr>`; }).join("")}</tbody>
+      </table></div>
+    </section>
+  </div>`;
+}
+function bindData(){
+  $("#runIngest").onclick = () => { S.console.ingest =
+`$ scr/ingest.py
+read  VN100 data.xlsx   16,900 rows, 100 dropped (non-session / footer)
+<span class="o">OK</span>    validate: 100 tickers, 169 sessions, no (date, ticker) clash
+<span class="w">WARN</span>  vendor market_cap differs > 1% on 20 tickers (NVL 9.0%), QA only
+<span class="o">OK</span>    swapped in data/market.db, wrote data/market.txt`; render(); };
+  $("#runParams").onclick = () => { S.console.params =
+`$ scr/params.py --date 2026-09-11 ; scr/baseline.py --date 2026-09-11
+<span class="o">OK</span>    100 tickers mapped to 20 groups, float cap > 0
+INFO  fol_limit blank for 100 tickers (index/fol.csv header only)
+<span class="o">OK</span>    wrote data/params/2026-09-11.csv
+<span class="o">OK</span>    wrote portfolio/baseline/2026-09-11/  (20 groups, unchanged set)`; render(); };
+}
+
+/* ---------- page: list ---------- */
+function renderList(){
+  const cards = Object.values(S.ports).map(P => {
+    const r = compute(P); const st = P.statement;
+    const scr = Object.entries(st.screens).filter(([,v])=>v.on).map(([k])=>k);
+    const cons = Object.entries(P.cons).filter(([,v])=>v.on).length;
+    const del = S.confirmDel === P.name
+      ? `<span class="confirm">Delete portfolio/${esc(P.name)}/ and its files? <button class="btn sm danger" data-del-yes="${P.name}">Delete</button><button class="btn sm" data-del-no>Keep</button></span>`
+      : `<button class="btn ghost sm" data-del="${P.name}">Delete</button>`;
+    return `<div class="card">
+      <button class="open" data-port="${P.name}">
+      <div class="inline" style="justify-content:space-between;width:100%"><span class="nm">${esc(P.name)}</span>${r.errs.length ? '<span class="pill bad">blocked</span>' : rangePill(r.n, st.holdings)}</div>
+      <p style="color:var(--ink-2);font-size:13px">${st.approach ? esc(st.approach) : '<i style="color:var(--ink-3)">No approach written yet</i>'}</p>
+      <div style="display:flex;flex-direction:column;gap:4px;width:100%">
+        <div class="row"><span>Holdings range</span><span class="num">${st.holdings.min}–${st.holdings.max}</span></div>
+        <div class="row"><span>Rebalance</span><span>${mandateText(st.rebalance)}</span></div>
+        <div class="row"><span>Screens · constraints</span><span>${scr.length ? scr.join(", ") : "off"} · ${cons ? cons + " on" : "off"}</span></div>
+        <div class="row"><span>Top group</span><span>${esc(r.rows[0].group)} <span class="num">${pct(r.rows[0].w,1)}</span></span></div>
+      </div></button>
+      <div class="foot"><span class="mono" style="color:var(--ink-3)">anchor ${P.forked.anchor}</span>${del}</div>
+    </div>`;
+  }).join("");
+  return `<div class="page">
+    <div class="head"><div><div class="crumbs">portfolio/</div><h1>Portfolios</h1></div></div>
+    <div class="cards">${cards}
+      <button class="card new" id="newCard"><b>+ New portfolio</b><span style="font-size:13px">Write the statement, then fork a baseline.</span></button>
+    </div>
+  </div>`;
+}
+function bindList(){
+  document.querySelectorAll(".open[data-port]").forEach(c => c.onclick = () => go("flow", c.dataset.port, 0));
+  $("#newCard").onclick = () => go("new");
+  document.querySelectorAll("[data-del]").forEach(b => b.onclick = () => { S.confirmDel = b.dataset.del; render(); });
+  document.querySelectorAll("[data-del-yes]").forEach(b => b.onclick = () => { delete S.ports[b.dataset.delYes]; S.confirmDel = null; render(); });
+  document.querySelectorAll("[data-del-no]").forEach(b => b.onclick = () => { S.confirmDel = null; render(); });
+}
+
+/* ---------- statement form ---------- */
+function statementForm(st, isNew){
+  const r = st.rebalance;
+  return `<div class="form">
+    ${isNew ? `<div class="field full"><label for="f_name">Folder name</label><input type="text" id="f_name" placeholder="hsc_strat_dividend"><span class="hint">Lowercase letters, digits, underscore. Becomes portfolio/&lt;name&gt;/.</span></div>` : ""}
+    <div class="field full"><label for="f_app">Approach strategy</label><textarea id="f_app" placeholder="e.g. Growth at a reasonable price; overweight consumption and private banks on credit recovery.">${esc(st.approach)}</textarea><span class="hint">Reference text for later review. Not used in calculations.</span></div>
+    <div class="field full"><label for="f_scope">Scope universe</label><textarea id="f_scope" placeholder="e.g. VN100 constituents, HOSE only, excluding state banks.">${esc(st.scope)}</textarea></div>
+    <div class="field"><label for="f_min">Holdings, minimum</label><input type="number" id="f_min" min="1" step="1" value="${st.holdings.min}"></div>
+    <div class="field"><label for="f_max">Holdings, maximum</label><input type="number" id="f_max" min="1" step="1" value="${st.holdings.max}"><span class="hint">The target step flags a holding count outside this range.</span></div>
+    <div class="field"><label>Rebalance on schedule</label>
+      <div class="seg" role="group" aria-label="Frequency">${["none","2W","1M","1Q"].map(f => `<button type="button" data-freq="${f}" aria-pressed="${(r.frequency||"none")===f}">${f==="none"?"Off":f}</button>`).join("")}</div>
+      <span class="hint">2W every two weeks · 1M monthly · 1Q quarterly</span></div>
+    <div class="field"><label for="f_drift">Rebalance on drift, % of book</label>
+      <div class="inline"><label class="toggle"><input type="checkbox" id="f_drift_on" ${r.drift_threshold!==null?"checked":""}> On</label>
+      <input type="number" id="f_drift" min="1" max="99" step="1" value="${r.drift_threshold!==null ? Math.round(r.drift_threshold*100) : 8}" style="width:80px" ${r.drift_threshold===null?"disabled":""}></div>
+      <span class="hint">Drift = ½ Σ |actual − target| across groups. Whichever trigger fires first.</span></div>
+    <div class="field full"><span class="err" id="f_err" role="alert"></span></div>
+  </div>`;
+}
+function readStatementForm(base){
+  const st = structuredClone(base);
+  st.approach = $("#f_app").value.trim(); st.scope = $("#f_scope").value.trim();
+  st.holdings = {min: parseInt($("#f_min").value,10), max: parseInt($("#f_max").value,10)};
+  const f = document.querySelector("[data-freq][aria-pressed=true]").dataset.freq;
+  st.rebalance = {frequency: f==="none" ? null : f, drift_threshold: $("#f_drift_on").checked ? (+$("#f_drift").value)/100 : null};
+  const e = [];
+  if (!(st.holdings.min >= 1 && st.holdings.max >= st.holdings.min)) e.push("Holdings need 1 ≤ min ≤ max.");
+  if (!st.rebalance.frequency && st.rebalance.drift_threshold === null) e.push("Set a schedule, a drift trigger, or both.");
+  if (st.rebalance.drift_threshold !== null && !(st.rebalance.drift_threshold > 0 && st.rebalance.drift_threshold < 1)) e.push("Drift must be between 1% and 99%.");
+  return {st, e};
+}
+function bindStatementForm(){
+  document.querySelectorAll("[data-freq]").forEach(b => b.onclick = () => document.querySelectorAll("[data-freq]").forEach(x => x.setAttribute("aria-pressed", x===b)));
+  $("#f_drift_on").onchange = e => $("#f_drift").disabled = !e.target.checked;
+}
+function renderNew(){
+  const st = {approach:"", scope:"", holdings:{min:20,max:30}, rebalance:{frequency:"1M", drift_threshold:0.08},
+    screens:{turnover:{on:false,min_pct:0.10}, float_cap:{on:false,min_bn_vnd:1000}}};
+  return `<div class="page" style="max-width:760px">
+    <div class="head"><div><div class="crumbs">portfolio/ · new</div><h1>New portfolio</h1></div></div>
+    <section class="panel"><div class="panel-h"><h2>Portfolio statement</h2><span class="label">writes statement.json</span></div>
+      <div class="panel-b">${statementForm(st, true)}</div>
+      <div class="panel-f"><button class="btn ghost" id="cancelNew">Cancel</button><button class="btn primary" id="createNew">Create and fork baseline</button></div>
+    </section>
+  </div>`;
+}
+function bindNew(){
+  bindStatementForm();
+  $("#cancelNew").onclick = () => go("list");
+  $("#createNew").onclick = () => {
+    const name = $("#f_name").value.trim();
+    const base = {approach:"",scope:"",holdings:{},rebalance:{},screens:{turnover:{on:false,min_pct:0.10}, float_cap:{on:false,min_bn_vnd:1000}}};
+    const {st, e} = readStatementForm(base);
+    if (!/^[a-z0-9_]+$/.test(name)) e.unshift("Folder name: lowercase letters, digits and underscore only.");
+    if (S.ports[name]) e.unshift(`portfolio/${name}/ already exists.`);
+    if (e.length) { $("#f_err").textContent = e.join(" "); return; }
+    S.ports[name] = blankPortfolio(name, st);
+    go("flow", name, 1);
+  };
+}
+
+/* ---------- page: flow ---------- */
+function stepStatus(P, k, r){
+  const st = P.statement;
+  switch(k){
+    case "statement": return mandateText(st.rebalance) + ` · ${st.holdings.min}–${st.holdings.max}`;
+    case "fork": return `anchor ${P.forked.anchor.slice(5)}`;
+    case "screen": { const on = Object.values(st.screens).filter(v=>v.on).length; return `${on ? on + " on" : "off"} · ${P.invalid.size} invalid`; }
+    case "book": { const no = Object.values(P.book).filter(b=>b.rating==="NO").length; return `${r.n} names · ${no} NO${P.tac.on ? " · tactical" : ""}`; }
+    case "constraints": { const on = Object.entries(P.cons).filter(([,v])=>v.on).map(([k])=>({sector:"sector",ucits:"large",stock:"stock"}[k])); return on.length ? on.join(" · ") : "off"; }
+    case "target": return r.errs.length ? "blocked" : `${r.holdings.length} names`;
+  }
+}
+function renderFlow(){
+  const P = S.ports[S.port]; normalize(P); const r = compute(P); const st = P.statement;
+  const k = STEPS[S.step].k;
+  const body = {statement:stepStatement, fork:stepFork, screen:stepScreen, book:stepBook, constraints:stepConstraints, target:stepTarget}[k](P, r);
+  const n = r.n, h = st.holdings;
+  const hi = Math.max(h.max*1.4, n*1.1, 10);
+  const top = r.rows.filter(x=>x.w>0).slice(0,5);
+  return `<div class="page">
+    <div class="head"><div><div class="crumbs">portfolio/${esc(P.name)}/</div><h1>${esc(P.name)}</h1></div>
+      <div class="inline"><button class="btn ghost" id="toList">All portfolios</button></div></div>
+    <nav class="steps" aria-label="Portfolio flow">${STEPS.map((s,i) => `<button data-step="${i}" aria-current="${i===S.step?"step":"false"}">
+      <span class="i">${i+1}${s.opt?'<span class="opt">optional</span>':""}</span><span class="t">${s.t}</span><span class="s">${esc(stepStatus(P, s.k, r))}</span></button>`).join("")}</nav>
+    <div class="flow">
+      <div style="display:flex;flex-direction:column;gap:16px;min-width:0">${body}
+        <div class="inline" style="justify-content:space-between">
+          <button class="btn" id="prev" ${S.step===0?"disabled":""}>Back</button>
+          ${S.step<5 ? `<button class="btn primary" id="next">Next: ${STEPS[S.step+1].t}</button>` : ""}
+        </div>
+      </div>
+      <aside class="aside">
+        <section class="panel"><div class="panel-b" style="display:flex;flex-direction:column;gap:4px">
+          <span class="label">Live target preview</span>
+          <div class="inline" style="justify-content:space-between"><span class="big">${n}</span>${rangePill(n, h)}</div>
+          <span style="font-size:12.5px;color:var(--ink-3)">holdings vs statement range</span>
+          <div class="meter" aria-hidden="true"><div class="band" style="left:${h.min/hi*100}%;width:${(h.max-h.min)/hi*100}%"></div><div class="dot" style="left:calc(${Math.min(n/hi,1)*100}% - 1px)"></div></div>
+          <div class="meter-l"><span>0</span><span>${h.min}–${h.max}</span><span>${Math.round(hi)}</span></div>
+          ${r.errs.length ? `<p class="err" style="margin-top:8px">${r.errs.map(esc).join("<br>")}</p>` : ""}
+        </div></section>
+        ${r.errs.length ? "" : `<section class="panel"><div class="panel-b" style="display:flex;flex-direction:column;gap:8px">
+          <span class="label">Largest groups</span>
+          ${top.map(x => `<div style="display:grid;grid-template-columns:1fr auto;gap:2px 8px;font-size:12.5px">
+            <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(x.group)}</span><span class="num">${pct(x.w,1)}</span>
+            <div class="bar" style="grid-column:1/-1;height:6px;min-width:0"><div class="t" style="top:0;bottom:0;width:${x.w*100}%;background:var(--${x.rating.toLowerCase()})"></div></div></div>`).join("")}
+        </div></section>`}
+        <section class="panel"><div class="panel-b kv" style="font-size:12.5px">
+          <dt>Rebalance</dt><dd style="font-family:var(--sans)">${mandateText(st.rebalance)}</dd>
+          <dt>Baseline</dt><dd>${P.forked.anchor}</dd>
+          <dt>Constraints</dt><dd style="font-family:var(--sans)">${stepStatus(P,"constraints",r)}</dd>
+        </div></section>
+      </aside>
+    </div>
+  </div>`;
+}
+
+function stepStatement(P){
+  return `<section class="panel"><div class="panel-h"><h2>Portfolio statement</h2><span class="label">statement.json</span></div>
+    <div class="panel-b">${statementForm(P.statement, false)}</div>
+    <div class="panel-f"><span class="pill ok" id="savedStmt" hidden>Saved</span><button class="btn primary" id="saveStmt">Save statement</button></div>
+  </section>`;
+}
+function stepFork(P){
+  const lost = P.forked.lost; const u = uni(P);
+  const opts = [...ELIGIBLE].reverse().map(d => `<option value="${d}" ${d===P.forked.anchor?"selected":""} ${DATA.anchors[d]?"":"disabled"}>${d}${DATA.anchors[d] ? "" : "  (build needed)"}</option>`).join("");
+  return `<section class="panel"><div class="panel-h"><h2>Fork the baseline</h2></div>
+    <div class="panel-b" style="display:flex;flex-direction:column;gap:14px">
+      <div class="form">
+        <div class="field"><label for="anchorSel">Baseline anchor</label><select id="anchorSel">${opts}</select>
+          <span class="hint">Any session with 21 sessions of history behind it. Grey ones have no params/baseline yet; the app builds them on demand.</span></div>
+        <div class="field"><label>&nbsp;</label><div class="inline"><button class="btn primary" id="refork">Re-fork onto selected</button></div>
+          <span class="hint">Carries ratings, multipliers and the investable universe by group name.</span></div>
+      </div>
+      <dl class="kv">
+        <dt>Forked from</dt><dd>portfolio/baseline/${P.forked.anchor}/sector_constituents.csv</dd>
+        <dt>Forked at</dt><dd>${P.forked.at}</dd>
+        <dt>Groups</dt><dd>${u.groups.length} carried · 0 new</dd>
+        <dt>Sticky anchor</dt><dd>${DATA.anchor}${P.forked.anchor !== DATA.anchor ? ' <span class="pill warn">portfolio sits on an older anchor</span>' : ""}</dd>
+      </dl>
+      ${lost.length ? `<div class="note warn"><b>Lost on the last re-fork:</b> ${lost.map(l => `${esc(l[0])} (${l[1]} ×${l[2]})`).join(", ")}. The group left the drop, so its view is gone. Re-express it on another group in the Book step if it still holds.</div>` : ""}
+      <p style="font-size:13px;color:var(--ink-2)">Forking copies the baseline grid into <span class="mono">input/</span> and rebuilds the book. You never edit weights directly: every change after this point is a group rating, a multiplier or a choice of names.</p>
+    </div></section>`;
+}
+function stepScreen(P){
+  const sc = P.statement.screens; const u = uni(P);
+  const hits = [];
+  u.groups.forEach(g => { const bk = P.book[g.name];
+    g.members.forEach(m => { if (P.invalid.has(m.t)) return;
+      if (sc.turnover.on && m.to < sc.turnover.min_pct) hits.push({t:m.t, g:g.name, s:"turnover", v:m.to.toFixed(3)+"%", th:"< "+sc.turnover.min_pct+"%", inb: bk.included.has(m.t)});
+      if (sc.float_cap.on && m.fcap < sc.float_cap.min_bn_vnd) hits.push({t:m.t, g:g.name, s:"float_cap", v:bn(m.fcap), th:"< "+bn(sc.float_cap.min_bn_vnd), inb: bk.included.has(m.t)});
+    }); });
+  const med = Object.values(u.TO).sort((a,b)=>a-b)[50];
+  const minFc = Object.entries(u.FC).sort((a,b)=>a[1]-b[1])[0];
+  return `<section class="panel"><div class="panel-h"><h2>Screens</h2><span class="label">read data/params/${P.forked.anchor}.csv · suggest only</span></div>
+    <div class="panel-b" style="display:flex;flex-direction:column;gap:14px">
+      <div class="scroll"><table>
+        <thead><tr><th>Screen</th><th>On</th><th>Invalidate when below</th><th>Universe</th></tr></thead>
+        <tbody>
+          <tr><td><b>21-day turnover</b><div style="font-size:12px;color:var(--ink-3)">avg daily value ÷ float cap</div></td>
+            <td><label class="toggle"><input type="checkbox" id="sc_to" ${sc.turnover.on?"checked":""} aria-label="Turnover screen on"></label></td>
+            <td><div class="inline"><input type="number" id="sc_to_v" step="0.05" min="0" value="${sc.turnover.min_pct}" style="width:90px"> <span class="mono">% / day</span></div></td>
+            <td class="mono" style="font-size:12px">median ${med.toFixed(3)}%</td></tr>
+          <tr><td><b>Float cap</b><div style="font-size:12px;color:var(--ink-3)">free float × official close</div></td>
+            <td><label class="toggle"><input type="checkbox" id="sc_fc" ${sc.float_cap.on?"checked":""} aria-label="Float cap screen on"></label></td>
+            <td><div class="inline"><input type="number" id="sc_fc_v" step="100" min="0" value="${sc.float_cap.min_bn_vnd}" style="width:90px"> <span class="mono">bn VND</span></div></td>
+            <td class="mono" style="font-size:12px">min ${bn(minFc[1])} (${minFc[0]})</td></tr>
+          <tr><td><b>Foreign ownership limit</b></td><td colspan="3"><span class="pill off">Deferred until index/fol.csv is filled</span></td></tr>
+        </tbody></table></div>
+    </div>
+    <div class="panel-h" style="border-top:1px solid var(--line)"><h3>Suggested <span class="num" style="color:var(--ink-3)">${hits.length}</span></h3>
+      <div class="inline"><button class="btn" id="scPickAll" ${hits.length?"":"disabled"}>Select all</button><button class="btn primary" id="scApply" ${P.screenPicks.size?"":"disabled"}>Invalidate ${P.screenPicks.size||""}</button></div></div>
+    ${hits.length ? `<div class="scroll"><table><thead><tr><th></th><th>Ticker</th><th>Group</th><th>Screen</th><th class="n">Value</th><th class="n">Threshold</th><th>Book</th></tr></thead><tbody>
+      ${hits.map(x => `<tr><td><input type="checkbox" data-pick="${x.t}" id="pick_${x.t}_${x.s}" ${P.screenPicks.has(x.t)?"checked":""} aria-label="Invalidate ${x.t}"></td><td class="mono">${x.t}</td><td>${esc(x.g)}</td><td class="mono">${x.s}</td><td class="n">${x.v}</td><td class="n">${x.th}</td><td>${x.inb ? '<span class="pill xs warn">investable now</span>' : '<span class="pill xs off">not selected</span>'}</td></tr>`).join("")}
+      </tbody></table></div>` : `<div class="panel-b"><p style="color:var(--ink-3);font-size:13px">${Object.values(sc).some(v=>v.on) ? "No valid name fails the screens." : "Turn a screen on to see suggestions. Nothing changes until you invalidate."}</p></div>`}
+    <div class="panel-h" style="border-top:1px solid var(--line)"><h3>Invalidated <span class="num" style="color:var(--ink-3)">${P.invalid.size}</span></h3><span class="label">stays in the book, cannot be made investable</span></div>
+    <div class="panel-b">${P.invalid.size ? `<div class="chips">${[...P.invalid].sort().map(t => `<span class="chip inv" style="cursor:default">${t}<button class="x" data-restore="${t}" title="Restore ${t}" aria-label="Restore ${t}">×</button></span>`).join("")}</div>` : `<p style="color:var(--ink-3);font-size:13px">None.</p>`}</div>
+  </section>`;
+}
+function chip(t, cls, extra=""){ return `<span class="chip ${cls}" draggable="${cls.includes("inv")||cls.includes("in ")||cls.includes("claimed")?"false":"true"}" data-t="${t}" title="${esc(DATA.co[t]||t)}">${t}${extra}</span>`; }
+function stepBook(P, r){
+  const u = uni(P); const c = claims(P);
+  const byG = Object.fromEntries(r.rows.map(x=>[x.group,x]));
+  const groups = u.groups.map(g => { const bk = P.book[g.name]; const x = byG[g.name]; const d = x.w - g.weight; const surv = survivors(P, g);
+    const inc = g.members.filter(m => bk.included.has(m.t));
+    return `<div class="grp ${bk.rating==="NO"?"isno":""}" data-g="${esc(g.name)}">
+      <div class="gside">
+        <div class="gname" title="${esc(g.name)}">${esc(g.name)}</div>
+        <div class="rate" role="group" aria-label="Rating for ${esc(g.name)}">${["NO","UW","AV","OW"].map(k => `<button data-g="${esc(g.name)}" data-r="${k}" aria-pressed="${bk.rating===k}" ${!surv.length && k!=="NO" ? "disabled title=\"No investable name\"" : ""}>${k}</button>`).join("")}</div>
+        <div class="inline" style="gap:6px"><span class="gmeta">×</span><input class="mult" type="number" step="0.05" min="0" id="m_${id(g.name)}" data-mg="${esc(g.name)}" placeholder="${DEF[bk.rating].toFixed(2)}" value="${bk.mult ?? ""}" ${bk.rating==="NO"?"disabled":""} aria-label="Multiplier override for ${esc(g.name)}">${bk.autoNo ? '<span class="pill xs off plain">auto NO</span>' : ""}</div>
+        <div class="gmeta">base ${pct(g.weight,1)} → <b style="color:var(--ink)">${pct(x.w,1)}</b> <span class="delta ${d>0.0005?"up":d<-0.0005?"dn":""}">${d>=0?"+":""}${(d*100).toFixed(1)}</span></div>
+      </div>
+      <div class="gboxes">
+        <div class="zone zone-all" data-g="${esc(g.name)}">
+          <div class="zone-h"><span class="label">All names · ${g.members.length}</span><button class="btn sm" data-addall="${esc(g.name)}" ${inc.length === g.members.filter(m=>!P.invalid.has(m.t)).length ? "disabled":""}>Add all</button></div>
+          <div class="chips">${g.members.map(m => { const cls = P.invalid.has(m.t) ? "inv" : c[m.t] ? "claimed" : bk.included.has(m.t) ? "in " : ""; return chip(m.t, cls, c[m.t] ? `<small style="opacity:.8">→ ${esc(c[m.t])}</small>` : ""); }).join("")}</div>
+        </div>
+        <div class="zone zone-inc" data-g="${esc(g.name)}">
+          <div class="zone-h"><span class="label">Investable · ${surv.length}</span><button class="btn sm" data-rmall="${esc(g.name)}" ${inc.length?"":"disabled"}>Remove all</button></div>
+          <div class="chips">${surv.length ? surv.map(m => chip(m.t, "", `<button class="x" data-rm="${m.t}" aria-label="Remove ${m.t}">×</button>`)).join("") : `<span class="empty">Drop names here${c[g.members[0]?.t] || Object.keys(c).some(t=>u.HOME[t]===g.name) ? " · some claimed by a tactical group" : ""}</span>`}</div>
+        </div>
+      </div>
+    </div>`; }).join("");
+  const tac = P.tac.groups.map((tg, i) => { const x = byG[tg.name]; return `<div class="tacg" data-tg="${i}">
+      <div class="gside">
+        <div class="inline" style="gap:6px"><input type="text" value="${esc(tg.name)}" data-tgname="${i}" aria-label="Tactical group name" style="padding:3px 6px;font-weight:600"><button class="btn sm ghost" data-tgdel="${i}" aria-label="Delete tactical group">×</button></div>
+        <div class="rate" role="group"><span class="chip tac" style="cursor:default;font-size:10.5px">tactical</span>${["UW","AV","OW"].map(k => `<button data-tg="${i}" data-r="${k}" aria-pressed="${tg.rating===k}">${k}</button>`).join("")}</div>
+        <div class="inline" style="gap:6px"><span class="gmeta">×</span><input class="mult" type="number" step="0.05" min="0" data-tgm="${i}" value="${tg.mult}" aria-label="Multiplier"></div>
+        <div class="gmeta">budget ${pct(tg.tickers.reduce((a,t)=>a+u.FC[t],0)/u.total,2)} → <b style="color:var(--ink)">${P.tac.on && x ? pct(x.w,1) : "off"}</b></div>
+      </div>
+      <div class="zone zone-tac" data-tg="${i}">
+        <div class="zone-h"><span class="label">Claims · ${tg.tickers.length}</span><span class="gmeta">from ${[...new Set(tg.tickers.map(t=>u.HOME[t]))].map(esc).join(", ") || "—"}</span></div>
+        <div class="combo">
+          <input type="text" id="tsearch_${i}" data-tsearch="${i}" placeholder="Type a ticker or company, Enter to claim" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="tlist_${i}" aria-label="Search stocks to claim for ${esc(tg.name)}">
+          <ul class="combo-list" id="tlist_${i}" role="listbox" hidden></ul>
+        </div>
+        <span class="err" id="terr_${i}" role="alert"></span>
+        <div class="chips">${tg.tickers.length ? tg.tickers.map(t => `<span class="chip tac" style="cursor:default" title="${esc(DATA.co[t]||t)} · home ${esc(u.HOME[t])}">${t}<button class="x" data-unclaim="${t}" aria-label="Release ${t}">×</button></span>`).join("") : `<span class="empty">No claims. A claimed name leaves its home group and takes its float-cap budget along.</span>`}</div>
+      </div>
+    </div>`; }).join("");
+  return `<section class="panel"><div class="panel-h"><h2>Book</h2>
+      <div class="legend"><span><i style="background:var(--ow)"></i>OW 1.25</span><span><i style="background:var(--av)"></i>AV 1.00</span><span><i style="background:var(--uw)"></i>UW 0.75</span><span><i style="background:var(--no)"></i>NO 0</span><span>Drag a name into Investable to include it. An empty box is NO.</span></div>
+      <div class="inline"><button class="btn sm" id="addAllG">Add all groups</button><button class="btn sm" id="rmAllG">Remove all groups</button></div></div>
+    ${groups}
+    <div class="panel-b"><p class="note">Removing a name keeps its group's budget; the survivors absorb it by float cap. Struck-through names are invalidated by a screen. A blank multiplier uses the rating default.</p></div>
+  </section>
+  <section class="panel"><div class="panel-h"><h2>Tactical overlay</h2><label class="toggle"><input type="checkbox" id="tac_on" ${P.tac.on?"checked":""}> ${P.tac.on?"On":"Off"}</label></div>
+    <div class="panel-b" style="display:flex;flex-direction:column;gap:12px;${P.tac.on?"":"opacity:.6"}">
+      ${tac || `<p style="color:var(--ink-3);font-size:13px">No tactical groups.</p>`}
+      <div class="inline"><input type="text" id="tacNew" placeholder="New tactical group name" style="width:260px"><button class="btn" id="tacAdd">Add tactical group</button>
+        <span style="font-size:12.5px;color:var(--ink-3)">${P.tac.on ? "Switching off releases every claim back to its home group." : "Claims are kept but inert while the overlay is off."}</span></div>
+    </div></section>`;
+}
+function stepConstraints(P, r){
+  const cs = P.cons; const live = r.rows.filter(x => x.unc > 0);
+  const n = r.n;
+  const con = (key, title, desc, body) => `<div class="con ${cs[key].on?"on":""}">
+      <label class="check"><input type="checkbox" data-con="${key}" ${cs[key].on?"checked":""}> ${title}</label><span class="desc" style="text-align:right">${desc}</span>
+      ${cs[key].on ? `<div class="body">${body}</div>` : ""}</div>`;
+  const sector = con("sector", "Sector cap", "group grain · applies to tactical groups too", `
+      <div class="inline"><div class="seg" role="group"><button data-capmode="universal" aria-pressed="${cs.sector.mode==="universal"}">Universal</button><button data-capmode="individual" aria-pressed="${cs.sector.mode==="individual"}">Individual</button></div>
+        <label for="cap_v" style="font-size:12.5px;color:var(--ink-2)">${cs.sector.mode==="universal" ? "Max weight per group" : "Default for groups without a value"}</label><input class="small-in" type="number" id="cap_v" min="1" max="100" step="1" value="${Math.round(cs.sector.max*100)}"><span class="mono">%</span></div>
+      ${cs.sector.mode==="individual" ? `<div class="scroll"><table><thead><tr><th>Live group</th><th class="n">Uncapped</th><th class="n">Cap %</th></tr></thead><tbody>
+        ${live.map(x => `<tr><td>${esc(x.group)}${x.kind==="tactical"?' <span class="pill xs off plain">tactical</span>':""}</td><td class="n">${pct(x.unc,1)}</td><td class="n"><input class="small-in" type="number" min="1" max="100" step="1" data-capg="${esc(x.group)}" value="${Math.round((cs.sector.per[x.group] ?? cs.sector.max)*100)}" aria-label="Cap for ${esc(x.group)}"></td></tr>`).join("")}
+      </tbody></table></div>` : ""}
+      <p class="desc">Feasible when caps sum to at least 100%: now ${pct(live.reduce((a,x)=>a+(cs.sector.mode==="individual" ? (cs.sector.per[x.group] ?? cs.sector.max) : cs.sector.max),0),0)} across ${live.length} live groups. Excess is redistributed pro-rata to groups under their cap, iterating until none is above.</p>`);
+  const stock = con("stock", "Max holding per stock", "stock grain", `
+      <div class="inline"><label for="stk_v" style="font-size:12.5px;color:var(--ink-2)">Max weight per name</label><input class="small-in" type="number" id="stk_v" min="1" max="100" step="0.5" value="${+(cs.stock.max*100).toFixed(1)}"><span class="mono">%</span></div>
+      <p class="desc">Feasible when ${pct(cs.stock.max,1)} × ${n} names ≥ 100%: now ${pct(cs.stock.max*n,0)}. Excess stays inside the name's group where it can; it spills to other groups only when every name there is already at the cap.</p>`);
+  const ucits = con("ucits", "Large holdings cap", "UCITS 5/10/40 style · stock grain", `
+      <div class="inline"><label for="uc_t" style="font-size:12.5px;color:var(--ink-2)">A name is large above</label><input class="small-in" type="number" id="uc_t" min="0.5" max="50" step="0.5" value="${+(cs.ucits.T*100).toFixed(1)}"><span class="mono">%</span>
+        <label for="uc_l" style="font-size:12.5px;color:var(--ink-2);margin-left:12px">Large names together at most</label><input class="small-in" type="number" id="uc_l" min="1" max="100" step="1" value="${Math.round(cs.ucits.L*100)}"><span class="mono">%</span></div>
+      <p class="desc">Large names are scaled down pro-rata to the aggregate cap; a name that would fall under the threshold stops there. The excess pours into names below the threshold, each stopping at the threshold, so no name ever crosses it and the large set only shrinks. Feasible when L + T × small names ≥ 100%.</p>`);
+  return `<section class="panel"><div class="panel-h"><h2>Constraints</h2><span class="label">applied after the tilt, in this order</span></div>
+    <div class="panel-b cons">${sector}${stock}${ucits}</div>
+    <div class="panel-h" style="border-top:1px solid var(--line)"><h3>Status</h3></div>
+    <div class="scroll"><table class="status"><tbody>${r.report.map(x => `<tr><td style="width:40%"><b>${x.k}</b></td><td>${x.on ? x.txt : '<span style="color:var(--ink-3)">off</span>'}</td></tr>`).join("")}</tbody></table></div>
+    ${r.errs.length ? `<div class="panel-b"><p class="note bad">${r.errs.map(esc).join("<br>")}</p></div>` : ""}
+  </section>`;
+}
+function stepTarget(P, r){
+  if (r.errs.length) return `<section class="panel"><div class="panel-h"><h2>Target allocation</h2><span class="pill bad">Blocked</span></div><div class="panel-b"><p class="err">${r.errs.map(esc).join("<br>")}</p></div></section>`;
+  const st = P.statement; const n = r.holdings.length; const u = uni(P);
+  const inRange = n >= st.holdings.min && n <= st.holdings.max;
+  const maxW = Math.max(...r.rows.map(x=>Math.max(x.w, x.base)));
+  const cs = P.cons;
+  return `<section class="panel"><div class="panel-h"><h2>Target allocation</h2>
+      <div class="inline">${P.built ? `<span class="pill ok">Built ${P.built}</span>` : `<span class="pill off">Preview, not built</span>`}<button class="btn primary" id="build">Build target</button></div></div>
+    ${inRange ? "" : `<div class="panel-b" style="padding-bottom:0"><p class="note warn"><b>${n} holdings is outside ${st.holdings.min}–${st.holdings.max}.</b> ${n < st.holdings.min ? "Add names to investable boxes or rate more groups above NO." : "Remove names or rate groups NO in the Book step."} The build still runs; the flag is a warning.</p></div>`}
+    <div class="scroll"><table>
+      <thead><tr><th>Group</th><th>Rating</th><th class="n">Base</th><th class="n">Tilted</th><th class="n">Target</th><th style="width:28%">Base <span style="font-weight:400">|</span> target</th></tr></thead>
+      <tbody>${r.rows.filter(x=>x.w>0).map(x => `<tr><td>${esc(x.group)}${x.kind==="tactical"?' <span class="pill plain off xs">tactical</span>':""}${x.capped?' <span class="pill plain warn xs">capped</span>':""}</td>
+        <td><span class="mono" style="color:var(--${x.rating.toLowerCase()});font-weight:500">${x.rating}</span> <span class="mono" style="color:var(--ink-3);font-size:12px">×${x.m.toFixed(2)}</span></td>
+        <td class="n">${pct(x.base)}</td><td class="n" style="color:var(--ink-3)">${pct(x.unc)}</td><td class="n"><b>${pct(x.w)}</b></td>
+        <td><div class="bar"><div class="t" style="width:${x.w/maxW*100}%;background:var(--${x.rating.toLowerCase()})"></div><div class="b" style="width:${x.base/maxW*100}%"></div>${cs.sector.on ? `<div class="c" style="left:${Math.min(1,(cs.sector.mode==="individual"?(cs.sector.per[x.group]??cs.sector.max):cs.sector.max)/maxW)*100}%"></div>` : ""}</div></td></tr>`).join("")}
+      </tbody></table></div>
+    <div class="panel-b" style="padding-block:6px 10px"><span style="font-size:12px;color:var(--ink-3)">${r.rows.filter(x=>x.w===0).length} groups at 0 (NO). Bar is the target, grey tick the baseline weight${cs.sector.on ? ", dashed line the cap" : ""}.</span></div>
+    </section>
+    <section class="panel"><div class="panel-h"><h2>Constraints in force</h2></div>
+      <div class="scroll"><table class="status"><tbody>${r.report.map(x => `<tr><td style="width:40%"><b>${x.k}</b></td><td>${x.on ? x.txt : '<span style="color:var(--ink-3)">off</span>'}</td></tr>`).join("")}</tbody></table></div></section>
+    <section class="panel"><div class="panel-h"><h2>Holdings <span class="num" style="color:var(--ink-3)">${n}</span></h2><span class="label">target/holdings.csv</span></div>
+      <div class="scroll" style="max-height:440px;overflow:auto"><table>
+        <thead><tr><th>Ticker</th><th>Company</th><th>Group</th><th class="n">Float cap, bn</th><th class="n">Weight</th><th></th></tr></thead>
+        <tbody>${r.holdings.map(hh => `<tr><td class="mono">${hh.t}</td><td>${esc(DATA.co[hh.t]||"")}</td><td>${esc(hh.group)}${hh.group!==hh.home?` <span style="color:var(--ink-3);font-size:12px">from ${esc(hh.home)}</span>`:""}</td><td class="n">${bn(u.FC[hh.t])}</td><td class="n">${pct(hh.w)}</td><td>${hh.pin==="max"?'<span class="pill xs warn plain">at max</span>':hh.pin==="T"?'<span class="pill xs warn plain">at threshold</span>':cs.ucits.on && hh.w > cs.ucits.T+EPS ? '<span class="pill xs off plain">large</span>':""}</td></tr>`).join("")}</tbody>
+      </table></div></section>`;
+}
+
+/* ---------- tactical claim search ---------- */
+/* Barrier rule: a stock belongs to at most one tactical group. Invalidated names cannot be claimed. */
+function claimBlock(P, i, t){
+  if (P.invalid.has(t)) return "invalidated by a screen";
+  const other = P.tac.groups.find((g, j) => j !== i && g.tickers.includes(t));
+  if (other) return `already in ${other.name}`;
+  if (P.tac.groups[i].tickers.includes(t)) return "already claimed here";
+  return null;
+}
+function bindTacSearch(P){
+  const u = uni(P);
+  const all = Object.keys(u.FC).sort();
+  document.querySelectorAll("[data-tsearch]").forEach(inp => {
+    const i = +inp.dataset.tsearch;
+    const list = $("#tlist_" + i), err = $("#terr_" + i);
+    let hits = [], cur = -1;
+    const draw = () => {
+      const q = inp.value.trim().toUpperCase();
+      if (!q){ list.hidden = true; inp.setAttribute("aria-expanded","false"); return; }
+      hits = all.filter(t => t.startsWith(q))
+        .concat(all.filter(t => !t.startsWith(q) && ((DATA.co[t]||"").toUpperCase().includes(q))))
+        .slice(0, 8).map(t => ({t, why: claimBlock(P, i, t)}));
+      if (cur >= hits.length || (cur >= 0 && hits[cur].why)) cur = hits.findIndex(h => !h.why);
+      if (cur < 0) cur = hits.findIndex(h => !h.why);
+      list.innerHTML = hits.length ? hits.map((h, k) => `<li role="option" id="topt_${i}_${k}" data-k="${k}" aria-selected="${k===cur}" aria-disabled="${!!h.why}" class="${h.why?"dis":""}">
+          <span class="mono"><b>${h.t}</b></span><span class="co">${esc(DATA.co[h.t]||"")}</span><span class="why">${h.why ? esc(h.why) : esc(u.HOME[h.t])}</span></li>`).join("")
+        : `<li class="dis" aria-disabled="true"><span class="why">No stock in the ${P.forked.anchor} universe matches "${esc(inp.value.trim())}"</span></li>`;
+      list.hidden = false; inp.setAttribute("aria-expanded","true");
+      inp.setAttribute("aria-activedescendant", cur >= 0 ? `topt_${i}_${cur}` : "");
+    };
+    const take = h => {
+      if (!h) return;
+      if (h.why){ err.textContent = `${h.t} cannot be claimed: ${h.why}.`; return; }
+      P.tac.groups[i].tickers.push(h.t);
+      normalize(P); render();
+      const again = $("#tsearch_" + i); if (again) again.focus();
+    };
+    inp.addEventListener("input", () => { err.textContent = ""; cur = -1; draw(); });
+    inp.addEventListener("keydown", e => {
+      if (e.key === "ArrowDown" || e.key === "ArrowUp"){
+        e.preventDefault(); if (!hits.length) return;
+        const step = e.key === "ArrowDown" ? 1 : -1;
+        for (let n = 0, k = cur; n < hits.length; n++){ k = (k + step + hits.length) % hits.length; if (!hits[k].why){ cur = k; break; } }
+        draw();
+      } else if (e.key === "Enter"){
+        e.preventDefault();
+        const q = inp.value.trim().toUpperCase();
+        const exact = hits.find(h => h.t === q);
+        take(exact || hits[cur] || hits[0]);
+      } else if (e.key === "Escape"){ inp.value = ""; draw(); }
+    });
+    inp.addEventListener("blur", () => setTimeout(() => { if (list) list.hidden = true; }, 150));
+    list.addEventListener("mousedown", e => { const li = e.target.closest("li[data-k]"); if (!li) return; e.preventDefault(); take(hits[+li.dataset.k]); });
+  });
+}
+
+/* ---------- drag and drop ---------- */
+function bindDrag(P){
+  const u = uni(P);
+  let drag = null;
+  document.querySelectorAll('.chip[draggable="true"]').forEach(ch => {
+    ch.addEventListener("dragstart", e => { drag = {t:ch.dataset.t, from: ch.closest(".zone")?.classList.contains("zone-inc") ? "inc" : ch.closest(".zone")?.classList.contains("zone-tac") ? "tac" : "all"}; e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", ch.dataset.t); ch.classList.add("ghost"); });
+    ch.addEventListener("dragend", () => { drag = null; ch.classList.remove("ghost"); });
+  });
+  const accepts = (z, d) => {
+    if (!d || P.invalid.has(d.t)) return false;
+    const home = u.HOME[d.t];
+    if (z.classList.contains("zone-inc")) return z.dataset.g === home && !claims(P)[d.t] && !P.book[home].included.has(d.t);
+    if (z.classList.contains("zone-all")) return z.dataset.g === home && d.from !== "all";
+    return false;                                  // tactical claims come from search only
+  };
+  document.querySelectorAll(".zone").forEach(z => {
+    z.addEventListener("dragover", e => { if (accepts(z, drag)) { e.preventDefault(); e.dataTransfer.dropEffect = "move"; z.classList.add("over"); } });
+    z.addEventListener("dragleave", () => z.classList.remove("over"));
+    z.addEventListener("drop", e => { e.preventDefault(); z.classList.remove("over"); if (!accepts(z, drag)) return;
+      const t = drag.t, home = u.HOME[t];
+      if (z.classList.contains("zone-inc")) P.book[home].included.add(t);
+      else if (z.classList.contains("zone-all") && drag.from === "inc") P.book[home].included.delete(t);
+      normalize(P); render(); });
+  });
+}
+
+function bindFlow(){
+  const P = S.ports[S.port]; const k = STEPS[S.step].k; const u = uni(P);
+  $("#toList").onclick = () => go("list");
+  document.querySelectorAll("[data-step]").forEach(b => b.onclick = () => { S.step = +b.dataset.step; render(); });
+  $("#prev").onclick = () => { S.step--; render(); };
+  if ($("#next")) $("#next").onclick = () => { S.step++; render(); window.scrollTo({top:0}); };
+  const R = () => { normalize(P); render(); };
+  if (k === "statement"){
+    bindStatementForm();
+    $("#saveStmt").onclick = () => { const {st, e} = readStatementForm(P.statement);
+      if (e.length){ $("#f_err").textContent = e.join(" "); return; }
+      P.statement = st; render(); $("#savedStmt").hidden = false; };
+  }
+  if (k === "fork") $("#refork").onclick = () => { const a = $("#anchorSel").value; if (!DATA.anchors[a]) return;
+    const old = uni(P).groups.map(g=>g.name); P.forked = {anchor:a, at:"2026-09-14 (now)", lost: old.filter(g => !UNI[a].byName[g]).map(g => [g, P.book[g].rating, mult(P.book[g].rating, P.book[g].mult)])};
+    // carry by group name: included names that still exist; new groups arrive AV, all names in
+    UNI[a].groups.forEach(g => { const bk = P.book[g.name]; if (!bk) return; const names = new Set(g.members.map(m=>m.t)); bk.included = new Set([...bk.included].filter(t => names.has(t))); });
+    R(); };
+  if (k === "screen"){
+    const sc = P.statement.screens;
+    const upd = () => { sc.turnover.on = $("#sc_to").checked; sc.turnover.min_pct = +$("#sc_to_v").value;
+      sc.float_cap.on = $("#sc_fc").checked; sc.float_cap.min_bn_vnd = +$("#sc_fc_v").value; P.screenPicks.clear(); render(); };
+    ["#sc_to","#sc_fc","#sc_to_v","#sc_fc_v"].forEach(s => $(s).onchange = upd);
+    document.querySelectorAll("[data-pick]").forEach(c => c.onchange = () => { c.checked ? P.screenPicks.add(c.dataset.pick) : P.screenPicks.delete(c.dataset.pick); render(); });
+    if ($("#scPickAll")) $("#scPickAll").onclick = () => { document.querySelectorAll("[data-pick]").forEach(c => P.screenPicks.add(c.dataset.pick)); render(); };
+    $("#scApply").onclick = () => { P.screenPicks.forEach(t => { P.invalid.add(t); P.book[u.HOME[t]].included.delete(t); }); P.screenPicks.clear(); R(); };
+    document.querySelectorAll("[data-restore]").forEach(b => b.onclick = () => { P.invalid.delete(b.dataset.restore); R(); });
+  }
+  if (k === "book"){
+    document.querySelectorAll(".grp .rate button").forEach(b => b.onclick = () => { const bk = P.book[b.dataset.g]; bk.rating = b.dataset.r; bk.autoNo = false; if (bk.rating==="NO") bk.mult = null; R(); });
+    document.querySelectorAll("[data-mg]").forEach(i => i.onchange = () => { P.book[i.dataset.mg].mult = i.value === "" ? null : Math.max(0, +i.value); R(); });
+    document.querySelectorAll("[data-addall]").forEach(b => b.onclick = () => { const g = u.byName[b.dataset.addall]; g.members.forEach(m => { if (!P.invalid.has(m.t)) P.book[g.name].included.add(m.t); }); R(); });
+    document.querySelectorAll("[data-rmall]").forEach(b => b.onclick = () => { P.book[b.dataset.rmall].included.clear(); R(); });
+    document.querySelectorAll("[data-rm]").forEach(b => b.onclick = () => { P.book[u.HOME[b.dataset.rm]].included.delete(b.dataset.rm); R(); });
+    $("#addAllG").onclick = () => { u.groups.forEach(g => g.members.forEach(m => { if (!P.invalid.has(m.t)) P.book[g.name].included.add(m.t); })); R(); };
+    $("#rmAllG").onclick = () => { u.groups.forEach(g => P.book[g.name].included.clear()); R(); };
+    $("#tac_on").onchange = e => { P.tac.on = e.target.checked; R(); };
+    $("#tacAdd").onclick = () => { const nm = $("#tacNew").value.trim(); if (!nm || P.tac.groups.some(g=>g.name===nm) || u.byName[nm]) return; P.tac.groups.push({name:nm, rating:"OW", mult:1.25, tickers:[]}); R(); };
+    document.querySelectorAll("[data-tgname]").forEach(i => i.onchange = () => { const nm = i.value.trim(); if (nm && !u.byName[nm]) P.tac.groups[+i.dataset.tgname].name = nm; R(); });
+    document.querySelectorAll("[data-tgdel]").forEach(b => b.onclick = () => { P.tac.groups.splice(+b.dataset.tgdel, 1); R(); });
+    document.querySelectorAll("[data-tg][data-r]").forEach(b => b.onclick = () => { P.tac.groups[+b.dataset.tg].rating = b.dataset.r; R(); });
+    document.querySelectorAll("[data-tgm]").forEach(i => i.onchange = () => { P.tac.groups[+i.dataset.tgm].mult = Math.max(0, +i.value); R(); });
+    document.querySelectorAll("[data-unclaim]").forEach(b => b.onclick = () => { P.tac.groups.forEach(g => g.tickers = g.tickers.filter(x => x !== b.dataset.unclaim)); R(); });
+    bindTacSearch(P);
+    bindDrag(P);
+  }
+  if (k === "constraints"){
+    const cs = P.cons;
+    document.querySelectorAll("[data-con]").forEach(c => c.onchange = () => { cs[c.dataset.con].on = c.checked; render(); });
+    document.querySelectorAll("[data-capmode]").forEach(b => b.onclick = () => { cs.sector.mode = b.dataset.capmode; render(); });
+    if ($("#cap_v")) $("#cap_v").onchange = e => { cs.sector.max = Math.min(1, Math.max(0.01, +e.target.value/100)); render(); };
+    document.querySelectorAll("[data-capg]").forEach(i => i.onchange = () => { cs.sector.per[i.dataset.capg] = Math.min(1, Math.max(0.01, +i.value/100)); render(); });
+    if ($("#stk_v")) $("#stk_v").onchange = e => { cs.stock.max = Math.min(1, Math.max(0.005, +e.target.value/100)); render(); };
+    if ($("#uc_t")) $("#uc_t").onchange = e => { cs.ucits.T = Math.min(1, Math.max(0.005, +e.target.value/100)); render(); };
+    if ($("#uc_l")) $("#uc_l").onchange = e => { cs.ucits.L = Math.min(1, Math.max(0.01, +e.target.value/100)); render(); };
+  }
+  if (k === "target") $("#build").onclick = () => { P.built = "2026-09-14 " + new Date().toTimeString().slice(0,5); render(); };
+}
+
+function render(){
+  renderNav();
+  const m = $("#main");
+  if (S.page === "data"){ m.innerHTML = renderData(); bindData(); }
+  else if (S.page === "list"){ m.innerHTML = renderList(); bindList(); }
+  else if (S.page === "new"){ m.innerHTML = renderNew(); bindNew(); }
+  else { m.innerHTML = renderFlow(); bindFlow(); }
+}
+S.page = "flow"; S.port = "hsc_strat_high_growth"; S.step = 3;
+render();
+</script>
+

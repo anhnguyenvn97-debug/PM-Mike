@@ -1,0 +1,12 @@
+ticker,group,screen,value,threshold
+ACB,Banks - Private,turnover,0.16084,0.2
+BMP,Building Materials,turnover,0.1959,0.2
+BWE,Utilities,turnover,0.0686805,0.2
+CMG,Technology,turnover,0.147691,0.2
+LPB,Banks - Private,turnover,0.16484,0.2
+MCH,Food - Staples & Beverage,turnover,0.168373,0.2
+NAB,Banks - Private,turnover,0.115728,0.2
+REE,Utilities,turnover,0.134626,0.2
+SIP,Real Estate - Industrial,turnover,0.097553,0.2
+SJS,Real Estate - Residential,turnover,0.191519,0.2
+TAL,Real Estate - Residential,turnover,0.117696,0.2

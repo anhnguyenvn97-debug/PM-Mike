@@ -1,5 +1,8 @@
 book:        portfolio/hsc_strat_high_growth/sector_constituents_custom.csv
-anchor_date: 2026-08-12
-sector_cap:  off
+anchor_date: 2026-09-11
+baseline:    portfolio/baseline/2026-09-11/
+params:      data/params/2026-09-11.csv
+constraints: off
 tactical:    off
-built_at:    2026-08-19 10:14
+holdings:    17 holdings vs range 20-30: OUTSIDE
+built_at:    2026-09-14 17:50

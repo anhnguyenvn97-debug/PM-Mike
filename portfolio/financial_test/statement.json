@@ -1,0 +1,22 @@
+{
+  "approach": "NA",
+  "holdings": {
+    "min": 5,
+    "max": 10
+  },
+  "rebalance": {
+    "frequency": "1Q",
+    "drift_threshold": null
+  },
+  "scope": "NA",
+  "screens": {
+    "float_cap": {
+      "min_bn_vnd": 1000,
+      "on": false
+    },
+    "turnover": {
+      "min_pct": 0.2,
+      "on": true
+    }
+  }
+}

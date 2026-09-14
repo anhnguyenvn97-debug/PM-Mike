@@ -1,0 +1,8 @@
+book:        portfolio/financial_test/sector_constituents_custom.csv
+anchor_date: 2026-09-11
+baseline:    portfolio/baseline/2026-09-11/
+params:      data/params/2026-09-11.csv
+constraints: stock 20.00% (3 at max)
+tactical:    off
+holdings:    8 holdings vs range 5-10: within
+built_at:    2026-09-14 22:50

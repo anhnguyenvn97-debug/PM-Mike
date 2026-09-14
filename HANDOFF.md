@@ -1,321 +1,226 @@
 # PM-Mike — Handoff
 
-Vietnam equity portfolio construction. Takes VN100 + deliberate picks, builds a
-float-cap **baseline** allocation, lets a PM express sector views by hand-editing
-a grid, and replays the result against local price history.
-
-State as of 2026-08-30 · 6 commits · 7 scripts · 2 live portfolios · no tests.
+Vietnam equity portfolio construction: a FiinPro drop becomes a float-cap
+baseline, a PM tilts it per portfolio, and the result is a target allocation.
+State as of 2026-09-14, after the ground-up rebuild (see `Progress.md` for the
+decision log, `Task.md` for what is left).
 
 ---
 
-## 1. The one architectural decision
+## 1. Architecture decision
 
-**The agent fetches; scripts own every write.**
+**One input, one database, scripts own every write.** FiinQuant MCP stalled, so
+the agent is no longer in the data path. FiinPro Portal exports are downloaded by
+hand and dropped into `data/fiinpro/`. Every derived file is rebuilt by a script;
+fix the input and re-run, never edit an output.
 
-FiinQuant is reachable only through an MCP server, so there is no Python client.
-Claude runs the `/eod` recipe (5 MCP calls), transcribes the response verbatim
-into `data/raw/<date>.csv`, and stops. `scr/load_eod.py` validates that CSV and is
-the only thing that writes `data/eod.parquet`. Same split on the history side:
-FiinPro exports are downloaded by hand into `data/fiinpro/`, and
-`scr/load_history.py` owns every write to `data/local_history.db`.
-
-Consequence: generated artifacts are never hand-edited. Fix the input, re-run.
-
-**Hand-edited files — the complete list:**
-
-| File | Owner | What it decides |
-|---|---|---|
-| `data/universe.yml` | PM | index + picks |
-| `index/group_map_live.csv` | PM | ticker → *Exclusive group* (the 21 sectors) |
-| `index/anchor_date.json` | PM | sticky pricing date |
-| `portfolio/<n>/sector_constituents_custom.csv` | PM | **the book** — ratings, multipliers, deletions |
-| `portfolio/<n>/sector_cap.json` | PM | max group weight, on/off |
-| `portfolio/<n>/tactical_group.csv` + `.json` | PM | cross-sector overlay, on/off |
-| `portfolio/<n>/backtest_rebalance.json` | PM | rebalance discipline (inherits baseline's) |
-
-Everything else on disk is derived and overwritten without asking.
+| Hand-edited file | Decides |
+|---|---|
+| `data/fiinpro/*.xlsx` | the market data and therefore the universe |
+| `index/group_map_live.csv` | ticker → ICB L2 sector → Exclusive group (default grouping) |
+| `index/anchor_date.json` | the session every weight is priced on (now 2026-09-11) |
+| `index/fol.csv` | foreign ownership limits (deferred, header only) |
+| `portfolio/<name>/statement.json` | approach, scope, holding range, rebalance mandate, screens |
+| `portfolio/<name>/sector_constituents_custom.csv` | the book: ratings, multipliers, deletions |
+| `portfolio/<name>/sector_cap.json` | sector cap switch and max weight |
+| `portfolio/<name>/tactical_group.json` + `.csv` | tactical overlay switch and claims |
+| `portfolio/<name>/backtest_rebalance.json` | legacy backtester discipline |
 
 ---
 
 ## 2. Pipeline
 
 ```
-data/universe.yml ──✎
-       │
-       ▼  /eod <date>   (agent: 5 MCP calls, verbatim transcription)
-data/raw/<date>.csv
-       │
-       ▼  scr/load_eod.py <date>            idempotent per date
-data/eod.parquet  ███ only record of past index membership
-       │
-       ├──▶ scr/build_group_map.py  ──▶ index/group_map_live.csv ──✎ (append-only)
-       │                                          │
-       ▼                                          ▼
-    scr/build_baseline.py  ◄─── index/anchor_date.json ──✎
-       │
-       ├──▶ portfolio/baseline/sector_allocation.csv    the anchor vector
-       └──▶ portfolio/baseline/sector_constituents.csv  the 4-row grid
-                   │
-                   ▼  scr/build_portfolio.py --fork <name>
-       portfolio/<name>/input/sector_constituents.csv   (machine territory)
-                   │
-                   ▼  copy up one level, edit rows 0–1 ──✎
-       portfolio/<name>/sector_constituents_custom.csv  THE BOOK
-                   │
-                   ▼  scr/build_portfolio_target.py <name>
-       portfolio/<name>/target/{sector_allocation,holdings,built_from}
-                   │
-                   └──▶ ⊗ sizing / execution stage NOT BUILT
+data/fiinpro/*.xlsx  ✎
+        │  scr/ingest.py        validate, rebuild from scratch, all-or-nothing
+        ▼
+data/market.db  + market.txt    prices, tickers, loads, prices_v (exchange)
+        │  scr/params.py        ◄── index/group_map_live.csv ✎, index/fol.csv ✎,
+        ▼                           index/anchor_date.json ✎
+data/params/<anchor>.csv        float cap, 21d turnover, sector, QA columns
+        │  scr/baseline.py
+        ▼
+portfolio/baseline/             sector_allocation.csv + sector_constituents.csv grid
+        │  scr/portfolio.py new <name>     → statement.json ✎
+        │  scr/portfolio.py fork <name>    → input/ + book (carried by group name)
+        │  scr/portfolio.py screen <name>  → screen/exclusions.csv (suggest, --apply)
+        ▼
+portfolio/<name>/sector_constituents_custom.csv  ✎ the book
+        │  scr/target.py <name>  ◄── sector_cap.json ✎, tactical_group.* ✎
+        ▼
+portfolio/<name>/target/        sector_allocation.csv, holdings.csv, built_from.txt
+        │
+        ▼
+sizing & execution              ⊗ not built
 
-── separate track, does not feed the above ──
-data/fiinpro/*.xlsx ──✎  ──▶ scr/load_history.py ──▶ data/local_history.db
-                                                            │
-       portfolio/<name>/backtest_rebalance.json ──✎         ▼
-                                    scr/backtest.py <name>
-                        portfolio/<name>/backtest/{equity,rebalances,summary}
-
-⊗  data/live/*.csv  — /live writes it, nothing reads it. By design.
+legacy, frozen:
+data/fiinpro/archive/*.xlsx → scr/load_history.py → data/local_history.db
+        → scr/backtest.py <name> → portfolio/<name>/backtest/
 ```
 
 ---
 
-## 3. The weighting math
-
-Float cap, always:
+## 3. Weighting math
 
 ```
-fcap_i = free_float_i × (market_cap_i / outstanding_shares_i)
+fcap_i = free_float_i × close_raw_i          params.float_cap
+b_g    = Σ fcap in group g / Σ fcap          baseline weight
+w_g    = b_g · m_g / Σ_h (b_h · m_h)         tilted group weight
+w_i    = w_g · fcap_i / S_g                  S_g = surviving float cap in g
 ```
 
-`market_cap / outstanding_shares` is the session's **official close** — last matched
-price on HOSE/HNX, session VWAP on UPCoM — without an exchange conditional, and it
-reconciles with the provider's own `market_cap` by construction.
+`close_raw` is the official close. `close_adj` is restated per ticker as of the
+extract date, so it is only used for returns. The vendor `market_cap` is kept as
+a QA column because it has transcription gaps (20 rows in the current drop).
 
-**Never `close_adj`.** The adjusted series folds each ticker's pending corporate-action
-factor into its own price, so an adjusted cross-section prices 102 names on 102 private
-scales. `close_adj` is comparable across *time* for one ticker; official close is
-comparable across *tickers* on one date. Weighting is a cross-section. `close_adj` is
-also restated backwards when an action is announced, which would silently rewrite
-historical weights.
-
-Tilt, priced on the anchor date:
-
-```
-b_g               baseline group budget (float-cap share)
-w_g = b_g·m_g / Σ_h b_h·m_h        group weight after multipliers
-w_i = w_g · fcap_i / S_g           name weight inside the group
-```
-
-Group layer is pure attribution — float-cap-within-group × float-cap-across-groups is
-algebraically flat float cap. It exists because it's the grain views are expressed at.
+Ratings: `NO` 0.0, `UW` 0.75, `AV` 1.0, `OW` 1.25. A number in row 0 overrides
+the default multiplier.
 
 ---
 
-## 4. The book (the PM-facing artifact)
+## 4. The book and overlays
 
-`sector_constituents_custom.csv` — 21 columns, one per sector, A–Z:
+The book is the baseline grid with rows 0–1 edited and cells blanked:
 
-```
-row 0   multiplier   the rating repeated (= use default), or a number override
-row 1   rating       AV | NO | OW | UW
-row 2   sector name  UNTOUCHED — the binding contract with input/
-row 3+  tickers      DELETE by blanking. No additions, no moves.
-```
-
-Defaults: `NO=0.0  UW=0.75  AV=1.0  OW=1.25`.
-
-**The rule that matters:** deleting a ticker is *stock selection*, not allocation.
-The sector keeps its full budget `b_g·m_g` and the survivors absorb the deleted name's
-weight by float cap. Cutting a sector's budget is what ratings and multipliers are for.
-
-Live example — `hsc_strat_high_growth`, Mining rated `OW` with a `4` override:
-baseline 0.14% → target 0.83%, `realised_tilt 5.81x`. Real Estate – Residential
-`UW` overridden to `0.5`: 25.98% → 18.87%.
-
-### Overlays, both OFF by default
-
-**Tactical groups** (`tactical_group.csv` + `.json`). A named group claims tickers
-away from their home sectors and is rated like a sector. This is the *one* place a
-name leaving a sector takes budget with it:
-
-```
-blank a cell  → name leaves, budget STAYS  (survivors absorb it)
-claimed       → name leaves, budget GOES   (b_g shrinks by its float cap)
-```
-
-Claims resolve against the **baseline** column, not the book column, so a name the book
-already deleted is still claimed. Total float cap is unchanged, so budgets still sum to 1.
-Leave claimed names in the book — blanking them there too makes the switch a one-way door.
-
-**Sector cap** (`sector_cap.json`, `max_weight` is a *fraction*). Clips every group and
-redistributes the excess pro-rata, **iteratively** — one pass can lift an under-cap group
-over the ceiling. Sits on top of the tilt and outranks it: a capped OW group comes out
-with `realised_tilt < 1`. Weights *inside* a group are untouched.
-
----
-
-## 5. Backtester
-
-`scr/backtest.py` is standalone. It imports the weighting math from
-`build_portfolio_target.py` **read-only** (one implementation of the tilt, zero edits)
-and writes only under `portfolio/<name>/backtest/`.
-
-It prices **every scenario the book's files allow** and ignores the on/off switches —
-only file *presence* gates a variant:
-
-| Variant | What it is |
+| Row | Content |
 |---|---|
-| `default` | book constituents, all multipliers forced to 1.0 |
-| `tilt` | the live math exactly |
-| `sector_cap` | tilt + `max_weight` |
-| `tactical` | tilt + overlay |
-| `sector_cap_tactical` | tilt → migrate → cap, live composition order |
+| 0 | multiplier (the rating repeated, or a number) |
+| 1 | rating `AV` / `NO` / `OW` / `UW` |
+| 2 | group names, immutable |
+| 3+ | tickers; blank a cell to delete, never add or move |
 
-Discipline comes from `backtest_rebalance.json`; `backtest_rebalance.txt` is a
-hand-maintained data dictionary that also records **why each default was chosen**
-(drift distributions, threshold sweeps, cost tables). Read it before touching the JSON.
+- **Blank a cell:** the name leaves and the group keeps its budget.
+- **Tactical claim:** the name leaves and takes its float cap into the tactical
+  group. Claims resolve against the baseline column.
+- **Sector cap:** clips every live group to `max_weight` and redistributes the
+  excess pro-rata, iterating until nothing is above. The cap outranks the tilt.
 
-Current defaults: quarterly re-anchor on the period's first session, drift band on at
-group grain, threshold 0.05, T+1 fill at `close_adj`, 10 bps brokerage/side + 10 bps sell tax.
-
-Notable calls already argued out in that file:
-- **group** grain, not name — within-group weights are float-cap arithmetic, not decisions.
-- Band **restores** the current target; it does not re-anchor. Restore is to full target,
-  not trimmed to the band edge (that design would need a cooldown; this one doesn't).
-- `anchor_on_rebalance: no` is a **diagnostic only** — by 2026-07-01 a frozen target sits
-  25.1% of NAV from the live one.
-- `execution_price` dominates the cost model: median |close_adj − open_adj| is 1.08% of
-  close, larger than any plausible brokerage assumption.
+**Re-fork carries by group name.** When the baseline changes, `fork` keeps each
+surviving group's rating and multiplier and keeps deleted names deleted. New
+names come in live, new groups come in `AV`, and vanished groups are reported
+with the rating they lose.
 
 ---
 
-## 6. What's actually on disk today
+## 5. Statement and screens
 
-**Data**
-
-| Store | Coverage | Source |
-|---|---|---|
-| `data/eod.parquet` | **3 sessions**, 2026-08-12 → 08-14, 102 tickers × 21 cols | agent via MCP |
-| `data/local_history.db` | 42,201 rows, 107 tickers, **403 sessions**, 2025-01-02 → 2026-08-18 | 3 FiinPro exports |
-
-Two disjoint stores with different adjustment semantics. Nothing reconciles them.
-`local_history.txt` is the regenerated data dictionary and the diffable record of DB state.
-
-Anchor date pinned to **2026-08-12**. Baseline: 21 groups, 102 names. Top budgets —
-Banks-Private 31.66%, Real Estate-Residential 25.98%, Banks-State 7.06%.
-
-**Portfolios**
-
-| | `hsc_strat_high_growth` | `hsc_strat_soe_dom` |
-|---|---|---|
-| Book | tilted — 9 live groups, 12 rated NO, 18 names | **untilted** — byte-identical to baseline |
-| `sector_cap.json` | off, 0.25 | off, 0.20 |
-| `tactical_group` | file absent | off — 1 group *SOE Divestment* (GAS, BSR, PLX) at OW×2 |
-| `target/` | 18 holdings | 102 holdings = baseline |
-
-**Backtest, 403 sessions, CAGR:**
-
-```
-hsc_strat_high_growth   default 23.6%   tilt 25.5%   sector_cap 27.6%
-                        (tactical variants skipped — no tactical_group.csv)
-hsc_strat_soe_dom       default 26.2%   tilt 26.2%   sector_cap 25.4%
-                        tactical 26.2%  sector_cap_tactical 25.5%
+```json
+{
+  "approach": "", "scope": "",
+  "holdings": {"min": 20, "max": 30},
+  "rebalance": {"frequency": "1Q", "drift_threshold": 0.05},
+  "screens": {
+    "turnover":  {"on": false, "min_pct": 0.1},
+    "float_cap": {"on": false, "min_bn_vnd": 1000}
+  }
+}
 ```
 
-`soe_dom` default == tilt because its book carries no view.
+- `holdings`: `target.py` WARNs when the surviving count is outside the range.
+- `rebalance`: frequency `2W` / `1M` / `1Q`, a drift threshold as a fraction, or
+  both. Drift is half the sum of absolute group weight gaps. No stage consumes it
+  yet.
+- `screens`: `turnover` is average daily traded value over 21 sessions as a
+  percent of float cap. `float_cap` is in billions of VND. FOL is deferred.
+  Screens never edit the book on their own; `--apply` does.
 
 ---
 
-## 7. Why it fails loudly (the guard rails)
+## 6. State on disk (2026-09-14)
 
-These are the design's real content — worth reading before changing anything.
+| Store | Content |
+|---|---|
+| `data/market.db` | 16,900 rows, 100 tickers, 169 sessions, 2026-01-05 → 2026-09-11, all HOSE |
+| `data/params/2026-09-11.csv` | 100 tickers, 20 groups; turnover median about 0.63%/day |
+| `portfolio/baseline/` | 20 groups; Banks – Private 31.13%, Real Estate – Residential 27.92%, Banks – State 6.78% |
+| `data/local_history.db` (legacy) | 42,201 rows, 107 tickers, 403 sessions, 2025-01-02 → 2026-08-18 |
 
-- **`load_eod.py`** reconstructs the provider's `market_cap` from official close ×
-  shares to 1e-5. This ties the price pull and the snapshot pull together: a
-  transcription typo in either breaks it. Also checks dupes, nulls, exchange codes,
-  close-inside-range on both price bases, float ≤ shares.
-- **`build_baseline.py`** *refuses to build* on a date with a pending corporate action
-  (`close_adj != close_raw` off UPCoM). On a stock dividend the price drops on the
-  ex-date but `outstanding_shares` rises only on the credit date — in that window
-  `market_cap` uses a stale share count and the name is understated by the whole bonus
-  ratio. No arithmetic fix exists, only a clean date.
-- **`build_portfolio_target.py`** has ~15 fatal guards: stale fork, sector row drift,
-  tickers added or moved between columns, a surviving sector with everything deleted,
-  a NO group with a nonzero multiplier, a book ticker with no parquet row, duplicate
-  tactical claims, an infeasible cap (`max_weight × live_groups < 100%`).
-- **`load_history.py`** rebuilds the DB from scratch every run into a temp file and
-  swaps only if every export validates — a bad drop can't destroy a good database.
-  Adjusted prices are adjusted *as of extract date*, so old and new rows can never be
-  merged and called a series.
-- **Exchange is derived, never joined**: `prices_v` reads it off the ceiling band width
-  (<8.5% HOSE, <12.5% HNX, <17.5% UPCOM). Correct *per session* — BSR reads UPCOM before
-  its 2025-01-17 HOSE transfer and HOSE after, which a joined snapshot would get wrong.
+Map rows with no data in the drop: DXS, F88, HDC, IMP, MSR, SCS, SZC. Mining has
+no members, so the baseline has 20 groups, not 21.
+
+| Portfolio | Book | Cap | Tactical | Holdings | Range |
+|---|---|---|---|---|---|
+| hsc_strat_high_growth | 12 groups NO, UW Banks – State, OW Consumer Retail, UW×0.5 RE – Residential | off (0.25) | none | 17 | 20–30, outside |
+| hsc_strat_soe_dom | all AV | off (0.20) | SOE Divestment OW×2 (GAS, BSR, PLX), off | 100 | 20–30, outside |
 
 ---
 
-## 8. Review points / open gaps
+## 7. Guard rails
 
-**Blocking a clean checkout**
-1. **`requirements.txt` is incomplete.** `duckdb` (1.5.5), `openpyxl` (3.1.5) and
-   `pyarrow` (25.0.1) are installed and imported but unpinned. `backtest.py`,
-   `load_history.py` and every parquet read fail on a fresh venv.
-2. **`ruff check scr`** — the lint gate named in `CLAUDE.md` — reports **8 findings**
-   today (import sort, 3× naive-datetime, 2× blind except, 1 unused unpack). Not clean.
-3. **Zero tests.** `pytest` is pinned; no test files exist. All correctness lives in
-   runtime guards, which only fire when someone runs the script.
+- **`ingest.py`** refuses duplicates, nulls, open or close outside the day's
+  range on both price bases, negative volume or value, and free float above
+  shares. It refuses two drops covering the same session, since they may carry
+  different adjustment states. A failed build leaves the old database untouched.
+- **`params.py`** fails on a ticker missing from the group map or with a blank
+  group, and on non-positive float cap.
+- **`baseline.py`** fails if the params file is missing or older than the
+  database. It warns on a changed group set and on `adj_factor != 1`, since share
+  counts may lag a stock dividend.
+- **`target.py`** fails on a stale fork, group row drift, added or moved tickers,
+  a live group with every name gone, bad ratings or multipliers, invalid overlay
+  files, an infeasible cap, and params rebuilt after the baseline.
+- **Exchange is derived per session** from the ceiling band width: under 8.5%
+  HOSE, under 12.5% HNX, under 17.5% UPCoM.
+
+Parity was proven before the old scripts were deleted: on the old 2026-08-12 data
+the new baseline was byte-identical and five target variants matched to 0.0.
+The backtester gave identical outputs after its imports moved to the new modules.
+
+---
+
+## 8. Open gaps
+
+**Needs a user decision**
+1. Both portfolios sit outside the default 20–30 holding range; the ranges and
+   the approach/scope text are placeholders.
+2. `hsc_strat_high_growth` lost its Mining OW×4 view when MSR left the drop.
 
 **Product / methodology**
-4. **No benchmark curve.** `default` is *book constituents at flat multipliers* — not the
-   untilted 102-name baseline and not VN100. Nothing in `summary.csv` answers "did the
-   tilt beat the market". Variant spreads are all the backtest can currently support.
-5. **Survivorship bias is structural.** `get_index_constituents` has no as-of parameter,
-   so `local_history.db` holds today's universe held backwards. Stamped into
-   `built_from.txt`; levels are optimistic. The forward `eod.parquet` snapshot is the
-   *only* accumulating membership record — and it is 3 days old.
-6. **Sizing/execution unbuilt.** `holdings.csv` stops at `target_weight` and carries both
-   price bases "for the sizing stage". No share counts, lot rounding, cash, or trade list.
-7. **`hsc_strat_soe_dom` currently expresses no view** — untilted book, both overlays off,
-   so `target/` is baseline. Its only articulated idea (SOE Divestment at OW×2) exists in
-   backtest only. Intentional, or a book someone forgot to finish?
+3. **No UI yet.** Step 4 in `Task.md`: artifact mockup, then a local Flask app.
+4. **FOL deferred.** `index/fol.csv` is empty and no screen reads it.
+5. **Rebalance mandate is recorded but unused.** Nothing consumes
+   `statement.json` rebalance yet; the backtester still reads its own JSON.
+6. **Backtester is on the legacy store.** It replays `local_history.db`, has no
+   benchmark curve, and its universe is today's names held backwards
+   (survivorship bias).
+7. **Sizing and execution unbuilt.** `holdings.csv` stops at `target_weight`.
 
 **Latent fragility**
-8. **Column-position coupling.** Books bind ratings by column *index*. Renaming a sector in
-   `group_map_live.csv` reorders the A–Z columns and silently misaligns every forked book.
-   Guarded by a grid-equality check (forces a re-fork) and a WARN in `build_baseline.py` —
-   but the re-fork discards the PM's rows 0–1, which must then be re-typed by hand.
-9. **`/eod` is LLM transcription.** Five MCP calls joined on ticker into a CSV. The
-   `market_cap` identity check is a strong backstop, but the step is manual and has no
-   retry semantics beyond re-running the recipe.
-10. `backtest.py:200` — `self.tac_r` is not assigned when `tactical_group.csv` is absent
-    (the 5-tuple branch sets it, the 4-tuple fallback doesn't). Unused today; a latent
-    `AttributeError` for anyone who reaches for tactical ratings.
+8. **Corporate action window.** An extract taken after the anchor cannot detect a
+   pending stock dividend; only a WARN on `adj_factor` remains.
+9. **Group map has no automatic source.** FiinPro drops carry no sector, so a new
+   ticker fails `params.py` until someone adds it to `group_map_live.csv`.
+10. `backtest.py`: `self.tac_r` is unassigned when `tactical_group.csv` is absent.
+    Unused today. Left alone because the backtester is frozen.
+11. `backtest_rebalance.txt` files still mention the deleted `build_*.py` scripts.
 
 ---
 
 ## 9. Runbook
 
 ```powershell
-# daily forward pull
-/eod 2026-08-31                                        # agent + MCP, writes raw CSV, runs loader
-.venv\Scripts\python.exe scr\build_group_map.py        # append new tickers, then fill Exclusive group by hand
-.venv\Scripts\python.exe scr\build_baseline.py         # anchors on index/anchor_date.json
+# new data: drop the FiinPro export into data\fiinpro\ (archive the old one)
+.venv\Scripts\python.exe scr\ingest.py
+.venv\Scripts\python.exe scr\params.py                  # anchors on index\anchor_date.json
+.venv\Scripts\python.exe scr\baseline.py
 
 # a new portfolio
-mkdir portfolio\<name>
-.venv\Scripts\python.exe scr\build_portfolio.py --fork <name>
-copy portfolio\<name>\input\sector_constituents.csv portfolio\<name>\sector_constituents_custom.csv
-#   ...edit rows 0-1, blank names to delete...
-.venv\Scripts\python.exe scr\build_portfolio_target.py <name>
+.venv\Scripts\python.exe scr\portfolio.py new <name>    # then edit statement.json
+.venv\Scripts\python.exe scr\portfolio.py fork <name>
+.venv\Scripts\python.exe scr\portfolio.py screen <name> # optional; --apply-all or --apply T ..
+#   ...edit rows 0-1 of sector_constituents_custom.csv, blank names to delete...
+.venv\Scripts\python.exe scr\target.py <name>
 
-# history + backtest
-#   drop stripped FiinPro exports into data\fiinpro\ first
-.venv\Scripts\python.exe scr\load_history.py
+# after a baseline change: re-fork every portfolio, then rebuild its target
+.venv\Scripts\python.exe scr\portfolio.py fork <name>
+.venv\Scripts\python.exe scr\target.py <name>
+
+# legacy backtest
 .venv\Scripts\python.exe scr\backtest.py <name>
-.venv\Scripts\python.exe scr\backtest.py <name> --variants default,tilt
 
-.venv\Scripts\python.exe -m ruff check scr
+# checks
+.venv\Scripts\python.exe -m pytest tests -q
+.venv\Scripts\ruff.exe check scr tests
 ```
 
-Every script's **module docstring is the spec** — it is longer and more precise than the
-code below it. Read it before editing. `backtest_rebalance.txt` plays the same role for
-the rebalance config.
+Every script's **module docstring is the spec**. Read it before editing.

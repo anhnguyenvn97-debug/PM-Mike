@@ -1,9 +1,9 @@
 """Price-return backtester: a book's variants replayed on local_history.db.
 
 STANDALONE from the forward-tracking pipeline. It reads the same hand-edited
-configs the live builder reads, imports the weighting math from
-build_portfolio_target.py READ-ONLY (one implementation of the tilt, zero
-edits to that script), and writes only under portfolio/<name>/backtest/ --
+configs the live builder reads, imports the weighting math from target.py
+and the grid grammar from common.py READ-ONLY (one implementation of the
+tilt), and writes only under portfolio/<name>/backtest/ --
 never target/, never data/, never anything the live pipeline consumes.
 
 Variants -- the full set the book's files allow, always. The on/off switches
@@ -69,11 +69,10 @@ from pathlib import Path
 import duckdb
 import numpy as np
 import pandas as pd
+from common import BOOK, CAP, GRID, PORTFOLIO, ROOT, TAC, BookError, read_grid
+from target import apply_caps, migrate, parse_ratings, read_tactical
 
-from build_portfolio_target import (
-    BASELINE, BOOK, CAP, GRID, PORTFOLIO, ROOT, TAC,
-    BookError, apply_caps, migrate, parse_ratings, read_grid, read_tactical,
-)
+BASELINE = PORTFOLIO / "baseline"
 
 REB = "backtest_rebalance.json"
 ALL_VARIANTS = ["default", "tilt", "sector_cap", "tactical", "sector_cap_tactical"]
@@ -106,7 +105,7 @@ def parse_edge(cfg: dict, key: str, src: Path | None):
     if v.lower() == "default":
         return None
     try:
-        return pd.Timestamp(datetime.strptime(v, "%d-%m-%Y").date())
+        return pd.Timestamp(datetime.strptime(v, "%d-%m-%Y").date())  # noqa: DTZ007 - date only
     except ValueError:
         raise BookError(f"{src.name if src else REB}: {key} {v!r} is neither "
                         "\"default\" nor dd-mm-yyyy")
@@ -339,7 +338,7 @@ class Backtest:
 
         def do_fill(i, d):
             nonlocal w, nav, invested, target, group_of, pending
-            tgt, w_grp, go = pending["triple"]
+            tgt, _w_grp, go = pending["triple"]
             if invested:
                 turn = 0.5 * float((tgt - w).abs().sum())
                 cost = turn * (2 * self.brokerage + self.sell_tax) / 1e4
@@ -523,7 +522,7 @@ def main() -> int:
             f"    today's constituents held backwards, no membership history.\n"
             f"    Every variant shares the bias; levels are optimistic,\n"
             f"    variant SPREADS are the reliable read.\n"
-            f"built_at:    {datetime.now():%Y-%m-%d %H:%M}\n",
+            f"built_at:    {datetime.now().astimezone():%Y-%m-%d %H:%M}\n",
             encoding="utf-8")
 
         print(f"OK    {bt.name}  {bt.sessions[0].date()} -> "

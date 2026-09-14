@@ -1,0 +1,5 @@
+{
+  "sector": {"on": false, "max": 0.25, "per_group": {}},
+  "stock": {"on": false, "max": 0.1},
+  "large": {"on": false, "threshold": 0.05, "aggregate": 0.4}
+}

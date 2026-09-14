@@ -1,0 +1,53 @@
+market.db - data dictionary
+generated 2026-09-14 18:06:02 by scr/ingest.py (do not edit)
+size 3.2 MB
+
+STATE
+  prices   16,900 rows | 100 tickers | 169 sessions | 2026-01-05 -> 2026-09-11
+
+SCHEMA  prices (PK trade_date, ticker) - VND, share counts unadjusted
+  trade_date         DATE     
+  ticker             VARCHAR  
+  reference          DOUBLE   prior session official close
+  ceiling            DOUBLE   price band upper; band width encodes exchange
+  floor              DOUBLE   
+  open_raw           DOUBLE   
+  high_raw           DOUBLE   
+  low_raw            DOUBLE   
+  close_raw          DOUBLE   official close; float cap uses this
+  open_adj           DOUBLE   back-adjusted, as of extract date
+  high_adj           DOUBLE   
+  low_adj            DOUBLE   
+  close_adj          DOUBLE   back-adjusted, as of extract date; returns only
+  volume             BIGINT   
+  value              DOUBLE   matched turnover; liquidity screens use this
+  outstanding_shares BIGINT   
+  free_float         BIGINT   share count, time-varying
+  market_cap         DOUBLE   vendor field, QA only
+
+SCHEMA  tickers (ticker PK, company_name)
+SCHEMA  loads   (file_name, sha256, row_count, dropped, date_min,
+                 date_max, ticker_count, loaded_at)
+
+VIEW  prices_v = prices + exchange from ceiling band
+  <8.5% HOSE | <12.5% HNX | <17.5% UPCOM | else NULL (listing day)
+  on 2026-09-11: HOSE=100
+
+COVERAGE  shortest histories
+  ACB     169 sessions  2026-01-05 -> 2026-09-11
+  ANV     169 sessions  2026-01-05 -> 2026-09-11
+  BAF     169 sessions  2026-01-05 -> 2026-09-11
+  BCM     169 sessions  2026-01-05 -> 2026-09-11
+  BID     169 sessions  2026-01-05 -> 2026-09-11
+
+BUILD  drops in this rebuild
+  VN100 data.xlsx
+      16,900 rows | 100 dropped | 100 tickers | 2026-01-05 -> 2026-09-11
+
+QUALITY  vendor market_cap vs close_raw * outstanding_shares
+  20 of 16,900 rows off by >1e-4
+  SHB       3 rows  worst   3.96%
+  NVL       2 rows  worst   9.01%
+  TCX       2 rows  worst   0.02%
+  DGW       1 rows  worst   0.99%
+  FPT       1 rows  worst   0.64%

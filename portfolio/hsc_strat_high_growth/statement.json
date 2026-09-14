@@ -1,0 +1,10 @@
+{
+  "approach": "",
+  "scope": "",
+  "holdings": {"min": 20, "max": 30},
+  "rebalance": {"frequency": "1Q", "drift_threshold": 0.05},
+  "screens": {
+    "turnover": {"on": false, "min_pct": 0.1},
+    "float_cap": {"on": false, "min_bn_vnd": 1000}
+  }
+}
