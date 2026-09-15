@@ -209,3 +209,55 @@ def test_guards(root, client):  # noqa: F811
     assert client.post("/api/p/p/build", json={},
                        headers={"Host": "evil.example"}).status_code == 403
     assert client.post("/api/p/p/fork", json={"anchor": "11/09/2026"}).status_code == 422
+
+
+def test_state_lists_benchmarks(root, client, drop, tmp_path):  # noqa: F811
+    import ingest
+    from conftest import INDEX_HEADERS, make_index_rows
+    from conftest import make_rows as stock_rows
+    db = tmp_path / "m.db"
+    files = [drop(stock_rows(sessions=4), "stock.xlsx"),
+             drop(make_index_rows(sessions=4)[2:], "bench.xlsx", INDEX_HEADERS)]
+    assert ingest.build(files, db) == 0
+    desk.app.config["DB"] = db
+    m = client.get("/api/state").get_json()["market"]
+    assert {ld["file"]: ld["kind"] for ld in m["loads"]} == {"stock.xlsx": "stock",
+                                                             "bench.xlsx": "index"}
+    assert m["benchmarks"] == [
+        {"code": "VN30", "sessions": 3, "from": "2026-01-06", "to": "2026-01-08", "missing": 1},
+        {"code": "VNINDEX", "sessions": 3, "from": "2026-01-06", "to": "2026-01-08", "missing": 1}]
+
+
+def test_backtest_run_switches_benchmark_and_writes_nothing(root, client):  # noqa: F811
+    from test_backtest_engine import make_db
+    home = make(root)
+    desk.app.config["DB"] = make_db(root, jumps=[("2026-09-08", "AAA", -0.10)])
+    d = client.get("/api/p/p/backtest").get_json()
+    assert d["config"]["risk_free_rate"] == 0.06 and d["version"] == "-"
+    cfg = {**d["config"], "brokerage_bps": 0, "sell_tax_bps": 0}
+    r = client.post("/api/p/p/backtest", json={"start": "2026-09-01", "benchmark": "VN30",
+                                               "config": cfg}).get_json()
+    assert r["ok"] and r["start"] == "2026-09-01" and r["end"] == "2026-09-11"
+    assert set(r["benchmarks"]) == {"VN30", "VNINDEX"}
+    assert r["benchmarks"]["VN30"]["stats"]["portfolio"]["total"] == pytest.approx(-0.04)
+    assert r["portfolio"][0] == 1.0 and len(r["dates"]) == len(r["portfolio"])
+    assert r["rebalances"][0]["trigger"] == "inception" and r["rebalances"][0]["drift"] is None
+    assert not (home / "backtest_config.json").exists() and not (home / "backtest_engine").exists()
+
+    bad = client.post("/api/p/p/backtest", json={"start": "2026-09-01", "benchmark": "VN50"}).get_json()
+    assert not bad["ok"] and "VN50" in bad["error"]
+    assert not client.post("/api/p/p/backtest", json={"start": "01/09/2026"}).get_json()["ok"]
+
+
+def test_backtest_config_save_validates_and_checks_version(root, client):  # noqa: F811
+    home = make(root)
+    v = client.get("/api/p/p/backtest").get_json()["version"]
+    r = client.put("/api/p/p/backtest_config", json={"config": {"lag_sessions": 9}, "version": v})
+    assert r.status_code == 422 and not (home / "backtest_config.json").exists()
+    r = client.put("/api/p/p/backtest_config",
+                   json={"config": {"risk_free_rate": 0.05}, "version": v})
+    assert r.status_code == 200
+    assert json.loads((home / "backtest_config.json").read_text())["risk_free_rate"] == 0.05
+    assert r.get_json()["version"] == client.get("/api/p/p/backtest").get_json()["version"]
+    r = client.put("/api/p/p/backtest_config", json={"config": {}, "version": v})  # stale copy
+    assert r.status_code == 422 and "changed on disk" in r.get_json()["log"]

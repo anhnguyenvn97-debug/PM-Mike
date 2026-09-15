@@ -5,6 +5,170 @@ left) and `HANDOFF.md` (the pre-rebuild system, now reference only).
 
 ---
 
+## 2026-09-15 — Commit: benchmarks, backtest engine, Backtest tab
+
+Branch `docs/handoff`, on top of `ae463f7`. User chose ONE commit with
+everything below, including the portfolio files and the `backtest_engine/`
+outputs.
+
+**Benchmark index drops into market.db** (Step 9, D24-D25)
+
+- `scr/ingest.py`, `tests/conftest.py`, `tests/test_ingest.py`
+- `scr/app.py`, `scr/static/desk.js` Data tab parts (Kind column, Benchmarks
+  table)
+- `data/fiinpro/Benchmarks.xlsx`, `data/fiinpro/README.txt` (new)
+- `data/market.txt` (regenerated dictionary)
+
+**Backtest engine and the desk Backtest tab** (Step 10, D26-D30)
+
+- `scr/backtest_engine.py`, `tests/test_backtest_engine.py` (new)
+- `scr/common.py` (`backtest_config.json` grammar)
+- `scr/app.py` (backtest routes), `scr/static/desk.js`, `scr/static/desk.css`
+- `tests/test_app.py` (benchmarks state + backtest routes)
+- `docs/backtest_mockup.html` (approved mockup, reference)
+- `CLAUDE.md`, `Task.md`, `Progress.md`
+
+**Portfolio files and outputs (included):**
+
+| Path | What it is |
+|---|---|
+| `portfolio/financial_test/statement.json`, `sector_constituents_custom.csv`, `screen/exclusions.csv` | Your portfolio edits (1M + 8% drift mandate, book, screen run) |
+| `portfolio/financial_test/backtest_config.json` | Saved from the Backtest tab (not written by me) |
+| `portfolio/*/backtest_engine/` | CLI outputs from the live runs; derived, regenerable. Commit like `backtest/`, or add to `.gitignore` |
+
+Checks at this point: pytest 91 passed, ruff clean. `tests/test_app.py` has
+CRLF line endings in the appended tests; git normalises them on add.
+
+---
+
+## 2026-09-15 — Step 10 done: Backtest tab in the desk
+
+| File | What |
+|---|---|
+| `scr/backtest_engine.py` | `run()` also returns `benchmarks`: curve and statistics for every code covering the window, so the page switches benchmark without a re-run. |
+| `scr/app.py` | `GET /api/p/<name>/backtest` (config, version, defaults), `POST /api/p/<name>/backtest` (engine run with the page's unsaved config, nothing written), `PUT /api/p/<name>/backtest_config` (validated, version-checked). `backtest_config.json` joins the desk-owned files. |
+| `scr/static/desk.js`, `desk.css` | Backtest page from the approved mockup (D30): nav entry and a Backtest button on each portfolio; auto-runs on first open; Run / stale bar / run stamp; benchmark and risk-free rate apply to the last result (Sharpe rescaled by rf); Save / Revert settings. |
+| `tests/test_app.py` | 2 tests: run returns all benchmarks and writes nothing, bad benchmark and date fail; config save validates and refuses a stale version. |
+
+Checks: pytest 91 passed, ruff clean. Browser, test desk on port 5055 with
+live data: high_growth −1.89% vs VNINDEX +0.38%, excess −2.27 pp (= CLI and
+mockup); lag 3 dims results with the stale bar until Run; VN30 and rf 3%
+switch instantly. Restart your desk and Ctrl+F5 to pick up the new code.
+
+---
+
+## 2026-09-15 — Step 10: backtest engine built
+
+User approved the mockup and engine logic; risk-free rate default 6%.
+
+### Changes
+
+| File | What |
+|---|---|
+| `scr/backtest_engine.py` | New. Docstring is the spec (D26-D30). `load_market`, `load_book` (via `target.compute`), `targets_at` (target.py's `migrate` / `apply_constraints` on a session's `free_float × close_raw`), `simulate`, `statistics`, `run` (no writes), `build` + CLI (`--start`, `--benchmark`) -> `portfolio/<name>/backtest_engine/`. |
+| `scr/common.py` | `backtest_config.json` grammar: `BT_CONFIG`, defaults (10/10 bps, lag 1, rf 0.06), `validate_backtest_config`, `load_backtest_config`. |
+| `tests/test_backtest_engine.py` | 18 tests: anchor weights = target, inception cost and lag, drift trigger and restore, monthly re-derivation, 2W periods, statistics, start snapping and window guards, group with no priced name, infeasible past date, build outputs, run writes nothing, config validation and defaults. |
+| `CLAUDE.md`, `Task.md` | Engine and config documented. |
+
+### Checks
+
+- pytest 89 passed; ruff clean. `backtest.py` untouched.
+- Live: engine vs prototype NAV within 1e-8 (prototype rounded its data),
+  identical triggers, 8 runs; mockup headline figures reproduced exactly.
+- CLI: high_growth vs VNINDEX from 2026-01-05 -1.89% vs +0.38%, Sharpe -0.38
+  at rf 6%; holdings 17 outside 20-30 WARNed per rebalance. financial_test vs
+  VN30 from 2026-04-01 +0.46% vs +4.02%. Unknown benchmark FAILs.
+
+### Next
+
+Backtest tab in the desk app.
+
+---
+
+## 2026-09-15 — Step 10 started: backtest engine spec
+
+### Decisions
+
+- **D26 backtest follows the mandate.** Engine reads the desk's files, not
+  the legacy `backtest_rebalance.json` / `sector_cap.json`:
+  `statement.json` rebalance (frequency `2W`/`1M`/`1Q` on the first session
+  of the period, `2W` counted from the start date; drift threshold at group
+  grain, ½Σ|gap|, restores the current target), the book held as of today,
+  the tactical overlay when its switch is on, `constraints.json` re-solved
+  with `target.apply_constraints` at every scheduled rebalance (infeasible
+  on a past date = FAIL), holdings range flagged per rebalance. Budgets
+  re-derived from that session's `free_float × close_raw`. Start date picked
+  by the user; end = last stock session.
+- **D27 screens.** Fixed `screen/invalid.csv` only; no point-in-time re-screen.
+- **D28 backtest config.** Costs, lag, fill price and risk-free rate live in
+  a separate per-portfolio backtest JSON, edited from the backtest tab; not
+  in `statement.json`.
+- **D29 chart.** Portfolio vs the chosen benchmark only. Later: a selector to
+  overlay other portfolios' backtests for cross-comparison.
+- **D30 run button.** Portfolio, start date, costs and lag take effect on
+  "Run backtest"; until then a stale bar says results show the last run and a
+  stamp names its settings. Benchmark and risk-free rate apply at once (they
+  rebase the comparison or change Sharpe, no re-simulation).
+
+### Mockup
+
+`docs/backtest_mockup.html`, built from a prototype in the job tmp folder:
+target weights per session from `target.py` functions (anchor parity 1e-8),
+simulation in page JS = Python prototype to 2e-16, identical triggers.
+Artifact publish blocked by permission; open the file locally.
+
+---
+
+## 2026-09-15 — Step 9 done: benchmarks in market.db
+
+User supplied `data/fiinpro/Benchmarks.xlsx` (FiinPro "Index & Sector"
+trading data, banner and footer removed by hand): VNINDEX, VN30, VN100, 170
+sessions each, 2026-01-05 -> 2026-09-14.
+
+### Decisions
+
+- **D24 return basis.** The backtest will be total return on `close_adj`
+  (dividend credited on the ex-date, reinvested in the same name). FiinPro
+  adjusts by ratio (verified: `close_adj / close_raw` is piecewise constant,
+  74 of 100 tickers adjusted). Benchmarks are price indexes; the gap (about
+  the dividend yield) is labelled, not corrected. Weighting stays
+  `free_float × close_raw`.
+- **D25 index drops.** Same folder as stock drops, told apart by header;
+  one rebuild loads both, all or nothing. Index date inside the stock range
+  but not a stock session = FAIL; past the last stock session or a stock
+  session a benchmark lacks = WARN. The index export carries 2026-09-14,
+  which the stock export had as a blank non-session.
+
+### Changes
+
+| File | What |
+|---|---|
+| `scr/ingest.py` | `read_drop` returns the kind; `index_prices (trade_date, code, close, volume, value)`; `validate_index` (dup, close <= 0, negatives); overlap check per table; `check_calendar`; `loads.kind`; `market.txt` benchmark schema and coverage. |
+| `scr/app.py`, `scr/static/desk.js` | `market()` adds `kind` per load and `benchmarks` (code, sessions, range, stock sessions missing); tolerates a pre-index database. Data tab: Kind column, Benchmarks table, price-return note. Rebuild database button unchanged (calls `ingest.main`). |
+| `tests/conftest.py`, `tests/test_ingest.py`, `tests/test_app.py` | Index drop fixture; 8 tests: load beside stock, late/short coverage warns, off-calendar fails, dup and zero close fail, overlap fails, unknown export fails, state lists benchmarks. |
+| `CLAUDE.md` | One market input now covers index exports. |
+
+### Checks
+
+- pytest 71 passed; ruff clean.
+- Live rebuild: `prices` and `tickers` identical to the previous database
+  (EXCEPT both ways, 0 rows). Three WARNs: one session past 2026-09-11 per
+  index. `/api/state` shows three benchmarks, 0 missing.
+- Side effect: the rebuilt `market.db` is newer than the params, so the Data
+  tab reports the built anchors stale until "Build params and baseline" runs
+  (content unchanged, no re-fork flagged).
+- A desk started before this change still has the old `ingest` module loaded
+  and would FAIL on `Benchmarks.xlsx` (database untouched). Restart the desk,
+  then Ctrl+F5 for the new `desk.js`.
+
+### Next
+
+Step 10: backtest engine spec and artifact mockup. Open question for the
+user: backtest window 2026-01-05 -> 2026-09-11 on current data, or supply a
+2025 stock drop plus 2025 index history first.
+
+---
+
 ## 2026-09-14 — Housekeeping and a false delete
 
 - `git rm index/group_map_default.csv` (staged, not committed): nothing read it.

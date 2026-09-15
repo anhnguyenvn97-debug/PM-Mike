@@ -5,6 +5,7 @@ function (ingest, params, baseline, portfolio new/fork/screen/delete,
 target.build) and returns what it printed. The UI writes only hand-edit files:
 
     statement.json                   statement form, validate_statement first
+    backtest_config.json             backtest tab settings, validate_backtest_config first
     constraints.json                 constraints step, validate_constraints first
     sector_constituents_custom.csv   book step: rows 0-1 and which names stay
     tactical_group.csv / .json       book step, tactical overlay
@@ -19,12 +20,23 @@ and so is a tactical group that claims nothing.
 Live preview posts the unsaved book, overlay and constraints to /preview, which
 runs target.compute with them as overrides: the same solver, nothing written.
 
+The Data tab lists every drop in data/fiinpro/ (stock and index alike, see
+ingest.py) and, per benchmark in index_prices, its sessions, range, and the
+stock sessions it lacks. Rebuild database runs ingest.main, which loads both.
+
 Freshness (common.newer_than) is shown, never acted on by itself: /api/state
 lists the built anchors whose params or baseline are older than an input
 (market.db, group_map_live.csv, fol.csv), the tickers on the latest session
 the group map lacks, and per portfolio whether its input/ grid differs from
 its anchor's baseline grid (re-fork needed, with the ratings a re-fork would
 lose). index/group_map_live.csv itself stays hand-edited.
+
+Backtest tab: POST /api/p/<name>/backtest runs backtest_engine.run with the
+page's start, benchmark and unsaved trading config (nothing written) and
+returns curves, statistics per benchmark, the rebalance log and end holdings.
+The page switches benchmark and risk-free rate on that result; portfolio,
+start, costs and lag need a new run. PUT /backtest_config saves
+backtest_config.json (validate_backtest_config, version-checked).
 
 Book spec, as the page sends it:
 
@@ -54,6 +66,7 @@ import threading
 from datetime import date
 from pathlib import Path
 
+import backtest_engine
 import baseline
 import duckdb
 import ingest
@@ -63,6 +76,7 @@ import target
 from common import (
     ALLOC,
     BOOK,
+    BT_CONFIG,
     CONSTRAINTS,
     DB,
     FORKED,
@@ -74,8 +88,10 @@ from common import (
     TAC,
     TAC_SWITCH,
     BookError,
+    default_backtest_config,
     default_constraints,
     grid_column,
+    load_backtest_config,
     load_constraints,
     load_statement,
     newer_than,
@@ -83,6 +99,7 @@ from common import (
     read_grid,
     read_invalid,
     read_switch,
+    validate_backtest_config,
     validate_constraints,
     validate_statement,
     write_grid,
@@ -209,7 +226,7 @@ def grids_from_spec(home: Path, spec: dict) -> tuple[list, dict]:
 
 
 VERSIONED = {"statement": (STATEMENT,), "constraints": (CONSTRAINTS,),
-             "book": (BOOK, TAC, TAC_SWITCH)}
+             "book": (BOOK, TAC, TAC_SWITCH), "backtest": (BT_CONFIG,)}
 
 
 def version(home: Path, key: str) -> str:
@@ -278,14 +295,27 @@ def market() -> dict:
     try:
         rows, tickers = con.execute(
             "SELECT count(*), count(DISTINCT ticker) FROM prices").fetchone()
+        cols = {r[0] for r in con.execute("DESCRIBE loads").fetchall()}
+        kind = "kind" if "kind" in cols else "'stock'"  # database built before index drops
         loads = con.execute(
             "SELECT file_name, row_count, dropped, date_min, date_max, ticker_count, "
-            "loaded_at FROM loads ORDER BY loaded_at").fetchall()
+            f"loaded_at, {kind} FROM loads ORDER BY loaded_at").fetchall()
+        tables = {r[0] for r in con.execute("SHOW TABLES").fetchall()}
+        bench = con.execute(
+            "SELECT i.code, count(*), min(i.trade_date), max(i.trade_date), "
+            "(SELECT count(*) FROM (SELECT DISTINCT trade_date FROM prices) s "
+            " WHERE s.trade_date NOT IN (SELECT trade_date FROM index_prices j "
+            "                            WHERE j.code = i.code)) "
+            "FROM index_prices i GROUP BY 1 ORDER BY 1").fetchall() \
+            if "index_prices" in tables else []
     finally:
         con.close()
     out.update(rows=rows, tickers=tickers, loads=[
         {"file": r[0], "rows": r[1], "dropped": r[2], "from": str(r[3]),
-         "to": str(r[4]), "tickers": r[5], "loaded_at": str(r[6])[:16]} for r in loads],
+         "to": str(r[4]), "tickers": r[5], "loaded_at": str(r[6])[:16], "kind": r[7]}
+        for r in loads],
+        benchmarks=[{"code": c, "sessions": n, "from": str(a), "to": str(b), "missing": m}
+                    for c, n, a, b, m in bench],
         rebuilt=stamp(db))
     return out
 
@@ -387,6 +417,38 @@ def preview_json(res: dict) -> dict:
             "in_range": res["in_range"], "range_note": res["range_note"],
             "cap_note": res["cap_note"], "tac_note": res["tac_note"],
             "report": res["report"], "messages": res["messages"]}
+
+
+def num(x):
+    """JSON-safe float: NaN and None become null."""
+    return None if x is None or pd.isna(x) else float(x)
+
+
+def stats_json(s: dict) -> dict:
+    return {k: ({kk: num(vv) for kk, vv in v.items()} if isinstance(v, dict) else num(v))
+            for k, v in s.items()}
+
+
+def backtest_json(res: dict) -> dict:
+    eq = res["equity"]
+    return {
+        "ok": True, "name": res["name"], "anchor": str(res["anchor"]),
+        "start": str(res["start"]), "end": str(res["end"]), "benchmark": res["benchmark"],
+        "config": res["config"], "rebalance": res["rebalance"],
+        "holdings_range": res["holdings_range"], "constraints": res["constraints"],
+        "tactical": res["tactical"], "messages": res["messages"],
+        "dates": [str(d) for d in eq["date"]],
+        "portfolio": [float(v) for v in eq["portfolio"]],
+        "benchmarks": {c: {"equity": [float(v) for v in b["equity"]], "stats": stats_json(b["stats"])}
+                       for c, b in res["benchmarks"].items()},
+        "rebalances": [{"decision": str(r.decision), "fill": str(r.fill), "trigger": r.trigger,
+                        "drift": num(r.group_drift), "turnover": float(r.turnover),
+                        "cost": float(r.cost), "holdings": int(r.holdings),
+                        "in_range": bool(r.in_range), "gone": r.gone}
+                       for r in res["rebalances"].itertuples()],
+        "holdings_end": [{"t": r.ticker, "group": r.group, "w": float(r.weight),
+                          "target": float(r.target)} for r in res["holdings_end"].itertuples()],
+    }
 
 
 def summary(name: str) -> dict:
@@ -697,6 +759,54 @@ def build(name):
     home_of(name)
     ok, log, _ = run(target.build, name, app.config["PORTFOLIO"], app.config["PARAMS"])
     return reply(ok, log)
+
+
+@app.get("/api/p/<name>/backtest")
+def get_backtest(name):
+    home = home_of(name)
+    with LOCK:
+        out = {"name": name, "version": version(home, "backtest"),
+               "defaults": default_backtest_config(), "config": default_backtest_config(),
+               "error": None}
+        try:
+            out["config"] = load_backtest_config(home)
+        except BookError as e:
+            out["error"] = str(e)
+        return jsonify(out)
+
+
+@app.post("/api/p/<name>/backtest")
+def run_backtest(name):
+    home_of(name)
+    b = body()
+    start, bench = b.get("start"), b.get("benchmark", "VNINDEX")
+    if start is not None and not (isinstance(start, str) and DATE.match(start)):
+        return jsonify(ok=False, error=f"start {start!r} is not YYYY-MM-DD")
+    if not isinstance(bench, str):
+        return jsonify(ok=False, error="benchmark must be an index code")
+
+    def calc():
+        return backtest_json(backtest_engine.run(
+            name, start, bench, config=b.get("config"), portfolio=app.config["PORTFOLIO"],
+            params_dir=app.config["PARAMS"], db=app.config["DB"] or DB))
+    ok, log, res = run(calc)
+    if not ok:
+        return jsonify(ok=False, error=log.removeprefix("FAIL  ").strip())
+    return jsonify(res)
+
+
+@app.put("/api/p/<name>/backtest_config")
+def save_backtest_config(name):
+    home = home_of(name)
+    b = body()
+
+    def save(c):
+        c = validate_backtest_config(c)
+        check_version(home, "backtest", b.get("version"))
+        atomic_text(home / BT_CONFIG, dump(c))
+        print(f"OK    saved portfolio/{name}/{BT_CONFIG}")
+    ok, log, _ = run(save, b.get("config"))
+    return reply(ok, log, version=version(home, "backtest"))
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -1,0 +1,6 @@
+{
+  "brokerage_bps": 10.0,
+  "sell_tax_bps": 10.0,
+  "lag_sessions": 1,
+  "risk_free_rate": 0.068
+}

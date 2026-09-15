@@ -1,0 +1,793 @@
+<meta charset="utf-8">
+<title>PM-Mike Backtest</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --ground:#F3F5F2; --surface:#FFFFFF; --sunk:#E8ECE7; --line:#D3D9D2; --line-2:#B9C2B8;
+  --ink:#16201B; --ink-2:#4A564F; --ink-3:#77827B;
+  --accent:#0E6655; --accent-ink:#FFFFFF; --accent-soft:#D5EAE4;
+  --ow:#1B8A3E; --ow-soft:#DCF1E1; --av:#A87A00; --av-soft:#F7ECC9;
+  --uw:#C23A2B; --uw-soft:#F8DEDA; --no:#6F7A74; --no-soft:#E3E7E3;
+  --warn:#9A5B00; --warn-soft:#FBE7C6; --ok:#1B7A45; --ok-soft:#D8EFE0;
+  --shadow:0 1px 2px rgba(22,32,27,.06),0 4px 16px rgba(22,32,27,.06);
+  --sans:"Archivo",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#101512; --surface:#171D19; --sunk:#0C100E; --line:#29322D; --line-2:#3A453F;
+    --ink:#E6ECE7; --ink-2:#A9B4AD; --ink-3:#7B8680;
+    --accent:#4FC2A7; --accent-ink:#06231C; --accent-soft:#163A31;
+    --ow:#56C77A; --ow-soft:#173524; --av:#E2B23C; --av-soft:#3A2F12;
+    --uw:#F0786A; --uw-soft:#3F1E1A; --no:#8B958F; --no-soft:#232A26;
+    --warn:#F0B35A; --warn-soft:#3A2A12; --ok:#5CCB8A; --ok-soft:#163324;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 6px 20px rgba(0,0,0,.35);
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#101512; --surface:#171D19; --sunk:#0C100E; --line:#29322D; --line-2:#3A453F;
+  --ink:#E6ECE7; --ink-2:#A9B4AD; --ink-3:#7B8680;
+  --accent:#4FC2A7; --accent-ink:#06231C; --accent-soft:#163A31;
+  --ow:#56C77A; --ow-soft:#173524; --av:#E2B23C; --av-soft:#3A2F12;
+  --uw:#F0786A; --uw-soft:#3F1E1A; --no:#8B958F; --no-soft:#232A26;
+  --warn:#F0B35A; --warn-soft:#3A2A12; --ok:#5CCB8A; --ok-soft:#163324;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 6px 20px rgba(0,0,0,.35);
+}
+*{box-sizing:border-box}
+body{background:var(--ground);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.5}
+button,input,select,textarea{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.num,td.n,.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+h1,h2,h3{margin:0;text-wrap:balance;font-weight:600;letter-spacing:-.01em}
+h1{font-size:22px} h2{font-size:17px} h3{font-size:14px}
+p{margin:0}
+.label{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-3);font-weight:600}
+
+.app{display:grid;grid-template-columns:232px 1fr;min-height:100vh}
+.rail{background:var(--surface);border-right:1px solid var(--line);padding:18px 14px;display:flex;flex-direction:column;gap:22px;position:sticky;top:0;height:100vh;overflow:auto}
+.brand{display:flex;flex-direction:column;gap:2px;padding-inline:8px}
+.brand b{font-size:16px;letter-spacing:-.01em}
+.brand span{font-family:var(--mono);font-size:11px;color:var(--ink-3)}
+.nav{display:flex;flex-direction:column;gap:2px}
+.nav .label{padding:0 8px 6px}
+.nav button{all:unset;cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 8px;border-radius:6px;color:var(--ink-2);font-size:13.5px}
+.nav button:hover{background:var(--sunk);color:var(--ink)}
+.nav button[aria-current="true"]{background:var(--accent-soft);color:var(--ink);font-weight:600}
+.nav button:focus-visible{outline:2px solid var(--accent)}
+.nav .sub{padding-left:18px;font-family:var(--mono);font-size:12px}
+.rail-foot{margin-top:auto;font-size:12px;color:var(--ink-3);padding-inline:8px;display:flex;flex-direction:column;gap:8px}
+.mock{font-size:11.5px;border:1px dashed var(--line-2);border-radius:6px;padding:8px;color:var(--ink-2)}
+
+main{padding-block:24px 64px;padding-inline:32px;min-width:0}
+.page{display:flex;flex-direction:column;gap:20px;max-width:1240px}
+.head{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap}
+.head .crumbs{font-family:var(--mono);font-size:12px;color:var(--ink-3)}
+
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:8px}
+.panel-h{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.panel-b{padding:16px}
+.panel-f{display:flex;justify-content:flex-end;gap:10px;align-items:center;padding:12px 16px;border-top:1px solid var(--line)}
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.kv{display:grid;grid-template-columns:max-content 1fr;gap:6px 16px;font-size:13px}
+.kv dt{color:var(--ink-3)} .kv dd{margin:0;font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+.btn{cursor:pointer;border:1px solid var(--line-2);background:var(--surface);border-radius:6px;padding:6px 12px;font-weight:500;font-size:13px;white-space:nowrap}
+.btn:hover{background:var(--sunk)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.primary:hover{filter:brightness(1.07)}
+.btn.ghost{border-color:transparent;background:transparent;color:var(--ink-2)}
+.btn.danger{color:var(--uw);border-color:var(--uw)}
+.btn.sm{padding:2px 8px;font-size:11.5px}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+
+.pill{display:inline-flex;align-items:center;gap:6px;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap}
+.pill::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+.pill.ok{background:var(--ok-soft);color:var(--ok)}
+.pill.warn{background:var(--warn-soft);color:var(--warn)}
+.pill.bad{background:var(--uw-soft);color:var(--uw)}
+.pill.off{background:var(--no-soft);color:var(--no)}
+.pill.plain::before{display:none}
+.pill.xs{font-size:10.5px;padding:1px 6px}
+
+table{border-collapse:collapse;width:100%;font-size:13px}
+th{text-align:left;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-3);padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:7px 10px;border-bottom:1px solid var(--line);vertical-align:middle}
+tr:last-child td{border-bottom:0}
+th.n,td.n{text-align:right}
+.scroll{overflow-x:auto}
+
+.console{font-family:var(--mono);font-size:12px;background:var(--sunk);border-top:1px solid var(--line);padding:12px 16px;white-space:pre-wrap;color:var(--ink-2);max-height:220px;overflow:auto;border-radius:0 0 8px 8px}
+.console .w{color:var(--warn)} .console .e{color:var(--uw)} .console .o{color:var(--ok)}
+
+/* portfolio list */
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:16px;display:flex;flex-direction:column;gap:12px;text-align:left}
+.card .open{all:unset;cursor:pointer;display:flex;flex-direction:column;gap:12px}
+.card:hover{border-color:var(--line-2);box-shadow:var(--shadow)}
+.card .nm{font-family:var(--mono);font-size:14px;font-weight:500}
+.card .row{display:flex;justify-content:space-between;gap:8px;font-size:13px;color:var(--ink-2)}
+.card.new{border-style:dashed;align-items:flex-start;justify-content:center;color:var(--ink-2);cursor:pointer}
+.card.new b{color:var(--accent);font-size:15px}
+.card .foot{display:flex;justify-content:space-between;align-items:center;gap:8px;border-top:1px solid var(--line);padding-top:10px;font-size:12.5px}
+.confirm{display:flex;gap:8px;align-items:center;color:var(--uw);font-size:12.5px;flex-wrap:wrap}
+
+/* stepper */
+.steps{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:0;background:var(--surface);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.steps button{all:unset;cursor:pointer;padding:10px 12px;display:flex;flex-direction:column;gap:2px;border-right:1px solid var(--line);position:relative;min-width:0}
+.steps button:last-child{border-right:0}
+.steps button:hover{background:var(--sunk)}
+.steps button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.steps .i{font-family:var(--mono);font-size:11px;color:var(--ink-3)}
+.steps .t{font-weight:600;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.steps .s{font-size:11.5px;color:var(--ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.steps button[aria-current="step"]{background:var(--accent-soft)}
+.steps button[aria-current="step"]::after{content:"";position:absolute;left:0;right:0;bottom:0;height:3px;background:var(--accent)}
+.steps .opt{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-3);margin-left:4px;font-weight:500}
+
+.flow{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:20px;align-items:start}
+.aside{position:sticky;top:16px;display:flex;flex-direction:column;gap:12px}
+.big{font-family:var(--mono);font-size:28px;font-weight:500;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.meter{height:8px;background:var(--sunk);border-radius:4px;position:relative;overflow:visible;margin-top:8px}
+.meter .band{position:absolute;top:0;bottom:0;background:var(--ok-soft);border-left:1px solid var(--ok);border-right:1px solid var(--ok)}
+.meter .dot{position:absolute;top:-4px;width:3px;height:16px;background:var(--ink);border-radius:1px}
+.meter-l{display:flex;justify-content:space-between;font-family:var(--mono);font-size:11px;color:var(--ink-3);margin-top:6px}
+
+/* forms */
+.form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 20px}
+.field{display:flex;flex-direction:column;gap:5px;min-width:0}
+.field.full{grid-column:1/-1}
+.field label{font-size:12.5px;font-weight:600;color:var(--ink-2)}
+.field .hint{font-size:12px;color:var(--ink-3)}
+input[type=text],input[type=number],textarea,select{background:var(--surface);border:1px solid var(--line-2);border-radius:6px;padding:7px 9px;width:100%;min-width:0}
+textarea{resize:vertical;min-height:64px}
+input:focus,textarea:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px;border-color:transparent}
+.inline{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.seg{display:inline-flex;border:1px solid var(--line-2);border-radius:6px;overflow:hidden}
+.seg button{all:unset;cursor:pointer;padding:5px 11px;font-size:12.5px;font-weight:500;border-right:1px solid var(--line-2)}
+.seg button:last-child{border-right:0}
+.seg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink)}
+.seg button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.toggle{display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-weight:500}
+.toggle input{appearance:none;width:32px;height:18px;border-radius:9px;background:var(--line-2);position:relative;cursor:pointer;margin:0;transition:background .15s;flex:none}
+.toggle input::after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--surface);transition:transform .15s}
+.toggle input:checked{background:var(--accent)}
+.toggle input:checked::after{transform:translateX(14px)}
+.check{display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-weight:600}
+.check input{width:16px;height:16px;margin:0;accent-color:var(--accent)}
+.err{color:var(--uw);font-size:12.5px}
+.note{font-size:12.5px;color:var(--ink-2);background:var(--sunk);border-radius:6px;padding:8px 10px}
+.note.warn{background:var(--warn-soft);color:var(--warn)}
+.note.bad{background:var(--uw-soft);color:var(--uw)}
+.small-in{width:84px!important;padding:3px 6px!important;font-family:var(--mono);font-size:12px;text-align:right}
+
+/* book */
+.rate{display:inline-flex;border-radius:6px;overflow:hidden;border:1px solid var(--line-2)}
+.rate button{all:unset;cursor:pointer;font-family:var(--mono);font-size:11.5px;font-weight:500;padding:3px 7px;color:var(--ink-3);border-right:1px solid var(--line)}
+.rate button:last-child{border-right:0}
+.rate button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.rate button[aria-pressed="true"][data-r="OW"]{background:var(--ow-soft);color:var(--ow)}
+.rate button[aria-pressed="true"][data-r="AV"]{background:var(--av-soft);color:var(--av)}
+.rate button[aria-pressed="true"][data-r="UW"]{background:var(--uw-soft);color:var(--uw)}
+.rate button[aria-pressed="true"][data-r="NO"]{background:var(--no-soft);color:var(--no)}
+.rate button:disabled{cursor:not-allowed;opacity:.5}
+.mult{width:64px!important;padding:3px 6px!important;font-family:var(--mono);font-size:12px;text-align:right}
+
+.grp{border-bottom:1px solid var(--line);display:grid;grid-template-columns:200px 1fr;gap:0}
+.grp:last-child{border-bottom:0}
+.grp.isno .gname{color:var(--ink-3)}
+.gside{padding:12px 14px;display:flex;flex-direction:column;gap:8px;border-right:1px solid var(--line);min-width:0}
+.gname{font-weight:600;font-size:13.5px;overflow:hidden;text-overflow:ellipsis}
+.gmeta{font-family:var(--mono);font-size:11.5px;color:var(--ink-3)}
+.gboxes{display:grid;grid-template-columns:1fr 1fr;min-width:0}
+.zone{padding:10px 12px;min-height:64px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.zone + .zone{border-left:1px dashed var(--line)}
+.zone.over{background:var(--accent-soft)}
+.zone-h{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.zone-h .label{font-size:10.5px}
+.chips{display:flex;flex-wrap:wrap;gap:4px}
+.chip{font-family:var(--mono);font-size:11.5px;padding:1px 6px;border-radius:4px;background:var(--sunk);border:1px solid var(--line);cursor:grab;user-select:none;display:inline-flex;gap:4px;align-items:center}
+.chip:hover{border-color:var(--line-2)}
+.chip.in{opacity:.45;cursor:default}
+.chip.inv{text-decoration:line-through;color:var(--ink-3);background:transparent;border-style:dashed;cursor:not-allowed}
+.chip.tac{background:var(--accent-soft);border-color:var(--accent)}
+.chip.claimed{opacity:.55;cursor:default;border-color:var(--accent);border-style:dashed}
+.chip .x{all:unset;cursor:pointer;color:var(--ink-3);padding:0 2px;font-size:12px}
+.chip .x:hover{color:var(--uw)}
+.chip.ghost{opacity:.3}
+.empty{font-size:12px;color:var(--ink-3);font-style:italic}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--ink-3)}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+
+.tacg{border:1px solid var(--accent);border-radius:8px;display:grid;grid-template-columns:200px 1fr;overflow:hidden}
+.tacg .gside{border-right:1px solid var(--line)}
+.tacg .zone{min-height:56px}
+.combo{position:relative;max-width:420px}
+.combo input{padding:5px 9px!important;font-size:13px}
+.combo-list{position:absolute;z-index:20;left:0;right:0;top:calc(100% + 4px);margin:0;padding:4px;list-style:none;background:var(--surface);border:1px solid var(--line-2);border-radius:6px;box-shadow:var(--shadow);max-height:300px;overflow:auto}
+.combo-list li{display:grid;grid-template-columns:52px minmax(0,1fr) auto;gap:10px;align-items:baseline;padding:5px 8px;border-radius:4px;cursor:pointer;font-size:12.5px}
+.combo-list li[aria-selected="true"]{background:var(--accent-soft)}
+.combo-list li:not(.dis):hover{background:var(--sunk)}
+.combo-list li .co{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink-2)}
+.combo-list li .why{font-size:11.5px;color:var(--ink-3);white-space:nowrap}
+.combo-list li.dis{cursor:not-allowed;opacity:.6}
+.combo-list li.dis .why{color:var(--uw)}
+
+/* allocation bars */
+.bar{position:relative;height:14px;background:var(--sunk);border-radius:3px;min-width:120px}
+.bar .b{position:absolute;top:0;bottom:0;left:0;border-right:2px solid var(--ink-3);background:transparent}
+.bar .t{position:absolute;top:3px;bottom:3px;left:0;border-radius:2px}
+.bar .c{position:absolute;top:0;bottom:0;border-left:2px dashed var(--warn)}
+.delta.up{color:var(--ow)} .delta.dn{color:var(--uw)}
+
+/* constraints */
+.cons{display:grid;grid-template-columns:1fr;gap:12px}
+.con{border:1px solid var(--line);border-radius:8px;padding:14px 16px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px 16px;align-items:start}
+.con.on{border-color:var(--accent)}
+.con .body{grid-column:1/-1;display:flex;flex-direction:column;gap:10px;padding-top:6px;border-top:1px solid var(--line)}
+.con .desc{font-size:12.5px;color:var(--ink-3)}
+.status td{font-size:12.5px}
+
+@media (max-width: 1000px){
+  .flow{grid-template-columns:1fr}
+  .aside{position:static}
+  .grp,.tacg{grid-template-columns:1fr}
+  .gside{border-right:0;border-bottom:1px solid var(--line)}
+}
+@media (max-width: 760px){
+  .app{grid-template-columns:1fr}
+  .rail{position:static;height:auto;flex-direction:row;flex-wrap:wrap;gap:12px;border-right:0;border-bottom:1px solid var(--line)}
+  .rail-foot{display:none}
+  .nav{flex-direction:row;flex-wrap:wrap}
+  .nav .label{display:none}
+  main{padding-inline:16px}
+  .grid2,.form,.gboxes{grid-template-columns:1fr}
+  .zone + .zone{border-left:0;border-top:1px dashed var(--line)}
+  .steps{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .steps button{border-bottom:1px solid var(--line)}
+}
+@media (prefers-reduced-motion: reduce){*{transition:none!important}}
+
+/* desk app additions */
+.pill.info{background:var(--accent-soft);color:var(--accent)}
+.busy{opacity:.6;pointer-events:none}
+.dirtybar{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 16px;background:var(--warn-soft);color:var(--warn);border-radius:8px;font-size:13px}
+.console .i{color:var(--accent)}
+
+body{margin:0}
+.ctl{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1.3fr) auto auto;gap:14px 20px;align-items:end}
+.runbtn{padding:7px 16px}
+.stamp{font-family:var(--mono);font-size:11.5px;color:var(--ink-3);padding-inline:2px}
+#results.stale,#perf.stale,#logp.stale,#holdp.stale{opacity:.55}
+.ctl .field input[type=date]{background:var(--surface);border:1px solid var(--line-2);border-radius:6px;padding:6px 9px;width:100%;min-width:0;color-scheme:light dark}
+.snap{font-family:var(--mono);font-size:11.5px;color:var(--ink-3)}
+.figs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr))}
+.fig{padding:14px 16px;display:flex;flex-direction:column;gap:4px;min-width:0}
+.fig + .fig{border-left:1px solid var(--line)}
+.fig .big{font-size:24px}
+.fig .sub{font-family:var(--mono);font-size:11.5px;color:var(--ink-3)}
+.pos{color:var(--ow)} .negv{color:var(--uw)}
+.chartwrap{position:relative;padding:8px 8px 4px}
+.chartwrap svg{display:block;width:100%;height:auto;overflow:visible}
+.ax{font-family:var(--mono);font-size:11px;fill:var(--ink-3)}
+.gridl{stroke:var(--line);stroke-width:1}
+.zero{stroke:var(--line-2);stroke-width:1}
+.lp{fill:none;stroke:var(--accent);stroke-width:2;stroke-linejoin:round}
+.lb{fill:none;stroke:var(--ink-2);stroke-width:1.4;stroke-dasharray:5 4;stroke-linejoin:round}
+.ex-up{fill:var(--ow-soft);stroke:none} .ex-dn{fill:var(--uw-soft);stroke:none}
+.lx{fill:none;stroke:var(--ink-2);stroke-width:1.2}
+.mk-calendar,.mk-inception{fill:var(--surface);stroke:var(--accent);stroke-width:2}
+.mk-drift{fill:var(--surface);stroke:var(--warn);stroke-width:2}
+.cross{stroke:var(--ink-3);stroke-width:1;stroke-dasharray:2 3}
+.tip{position:absolute;pointer-events:none;background:var(--surface);border:1px solid var(--line-2);border-radius:6px;box-shadow:var(--shadow);padding:7px 9px;font-size:12px;display:grid;grid-template-columns:auto auto;gap:2px 12px;white-space:nowrap;z-index:5}
+.tip b{grid-column:1/-1;font-family:var(--mono);font-weight:500}
+.tip span:nth-child(odd){color:var(--ink-3)}
+.tip span:nth-child(even){font-family:var(--mono);text-align:right}
+.key{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--ink-2);align-items:center}
+.key i{display:inline-block;width:18px;height:0;border-top:2px solid var(--accent);vertical-align:middle;margin-right:6px}
+.key i.b{border-top:1.5px dashed var(--ink-2)}
+.key i.d{width:9px;height:9px;border:2px solid var(--accent);border-radius:50%;background:var(--surface)}
+.key i.d.w{border-color:var(--warn)}
+.cmp th.n,.cmp td.n{width:18%}
+.cmp td:first-child{color:var(--ink-2)}
+.pill.cal{background:var(--accent-soft);color:var(--accent)}
+.mand dd{font-family:var(--sans)!important}
+.cfg{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 16px}
+.cfg input{font-family:var(--mono)}
+ul.caveats{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--ink-2);max-width:80ch}
+.tabs-note{font-size:12px;color:var(--ink-3)}
+@media (max-width:1000px){.ctl{grid-template-columns:1fr 1fr}.figs{grid-template-columns:repeat(2,minmax(0,1fr))}.fig:nth-child(3){border-left:0}.fig:nth-child(n+3){border-top:1px solid var(--line)}}
+@media (max-width:560px){.ctl,.cfg{grid-template-columns:1fr}}
+</style>
+
+<div class="app">
+  <aside class="rail">
+    <div class="brand"><b>PM-Mike Desk</b><span>anchor 2026-09-11</span></div>
+    <nav class="nav">
+      <div class="label">Desk</div>
+      <button type="button">Data</button>
+      <button type="button">Portfolios</button>
+      <button type="button" aria-current="true">Backtest</button>
+    </nav>
+    <div class="rail-foot">
+      <div class="mock">Mockup. The engine runs in this page on real <span class="mono">market.db</span> data and matches the Python prototype to 1e-16. It saves nothing.</div>
+    </div>
+  </aside>
+  <main>
+    <div class="page">
+      <div class="head">
+        <div>
+          <div class="crumbs" id="crumbs">portfolio / backtest</div>
+          <h1>Backtest</h1>
+        </div>
+        <span class="tabs-note" id="window"></span>
+      </div>
+
+      <section class="panel">
+        <div class="panel-b ctl">
+          <div class="field">
+            <label for="pf">Portfolio</label>
+            <select id="pf"></select>
+          </div>
+          <div class="field">
+            <label for="start">Start date</label>
+            <div class="inline">
+              <input type="date" id="start" style="max-width:170px">
+              <div class="seg" id="presets" role="group" aria-label="Start presets">
+                <button type="button" data-p="first">Earliest</button>
+                <button type="button" data-p="q2">Q2</button>
+                <button type="button" data-p="q3">Q3</button>
+                <button type="button" data-p="m1">1M</button>
+              </div>
+            </div>
+            <span class="snap" id="snap"></span>
+          </div>
+          <div class="field">
+            <label>Benchmark</label>
+            <div class="seg" id="bench" role="group" aria-label="Benchmark"></div>
+          </div>
+          <div class="field">
+            <button type="button" class="btn primary runbtn" id="run">Run backtest</button>
+          </div>
+        </div>
+      </section>
+
+      <div class="dirtybar" id="stale" hidden>
+        <span>Settings changed. Results below show the last run.</span>
+        <button type="button" class="btn sm primary" id="run2">Run backtest</button>
+      </div>
+      <div id="fail" class="note bad" hidden></div>
+      <div class="stamp" id="stamp"></div>
+
+      <section class="panel" id="results">
+        <div class="figs" id="figs"></div>
+        <div class="panel-h" style="border-top:1px solid var(--line)">
+          <h2>Growth of 100</h2>
+          <div class="key" id="key"></div>
+        </div>
+        <div class="chartwrap" id="cw">
+          <svg id="chart" viewBox="0 0 1000 300" role="img" aria-label="Portfolio and benchmark growth of 100"></svg>
+          <div class="label" style="padding:6px 8px 0">Excess vs benchmark</div>
+          <svg id="excess" viewBox="0 0 1000 110" role="img" aria-label="Cumulative excess return"></svg>
+          <div class="tip" id="tip" hidden></div>
+        </div>
+      </section>
+
+      <div class="grid2" id="perf">
+        <section class="panel">
+          <div class="panel-h"><h2>Performance</h2><span class="tabs-note" id="annnote"></span></div>
+          <div class="scroll"><table class="cmp" id="cmp"></table></div>
+        </section>
+        <section class="panel">
+          <div class="panel-h"><h2>Relative and trading</h2></div>
+          <div class="scroll"><table class="cmp" id="rel"></table></div>
+        </section>
+      </div>
+
+      <section class="panel" id="logp">
+        <div class="panel-h"><h2>Rebalance log</h2><span class="tabs-note">Decision at the close; fill at the close <span id="lagtxt"></span> later</span></div>
+        <div class="scroll"><table id="log"></table></div>
+      </section>
+
+      <div class="grid2">
+        <section class="panel">
+          <div class="panel-h"><h2>Mandate</h2><span class="pill plain off">read from the portfolio</span></div>
+          <div class="panel-b"><dl class="kv mand" id="mandate"></dl></div>
+        </section>
+        <section class="panel">
+          <div class="panel-h"><h2>Backtest settings</h2><span class="mono" style="font-size:11.5px;color:var(--ink-3)" id="cfgfile"></span></div>
+          <div class="panel-b cfg">
+            <div class="field"><label for="c_brok">Brokerage, bps per side</label><input type="number" id="c_brok" min="0" step="1"></div>
+            <div class="field"><label for="c_tax">Sell tax, bps</label><input type="number" id="c_tax" min="0" step="1"></div>
+            <div class="field"><label for="c_lag">Fill lag, sessions</label><input type="number" id="c_lag" min="0" max="5" step="1"></div>
+            <div class="field"><label for="c_rf">Risk-free rate, % a year</label><input type="number" id="c_rf" min="0" step="0.1"><span class="hint">Sharpe only; applies without a run</span></div>
+          </div>
+          <div class="panel-f">
+            <span class="tabs-note">Costs and lag need a run. Mockup: Save writes nothing</span>
+            <button type="button" class="btn" id="reset">Reset</button>
+            <button type="button" class="btn primary" disabled>Save</button>
+          </div>
+        </section>
+      </div>
+
+      <section class="panel" id="holdp">
+        <div class="panel-h"><h2>Holdings at the end</h2><span class="tabs-note" id="holdnote"></span></div>
+        <div class="scroll"><table id="hold"></table></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-h"><h2>Read before trusting the numbers</h2></div>
+        <div class="panel-b">
+          <ul class="caveats">
+            <li><b>Return basis differs.</b> The portfolio is total return on adjusted prices, with cash dividends reinvested on the ex-date. VNINDEX, VN30 and VN100 are price indexes, so the portfolio leads them by roughly the dividend yield before any skill.</li>
+            <li><b>Today's book, held backwards.</b> Group map, ratings, deleted and invalidated names are as of the anchor, 2026-09-11, and apply to every past date. The universe is today's 100 names, so survivorship and look-ahead bias flatter every level.</li>
+            <li><b>Rebalances follow the mandate.</b> A scheduled rebalance re-derives group budgets from that session's free float × official close and re-solves the constraints. A drift rebalance restores the last target without re-deriving it.</li>
+            <li><b>Cash until the first fill.</b> The benchmark counts from the start close; the portfolio buys at the close after the fill lag.</li>
+            <li><b>Short window.</b> Annualised figures stretch fewer than 252 sessions to a year; read total return and excess first.</li>
+          </ul>
+        </div>
+      </section>
+    </div>
+  </main>
+</div>
+
+<script>
+const D = {"sessions":["2026-01-05","2026-01-06","2026-01-07","2026-01-08","2026-01-09","2026-01-12","2026-01-13","2026-01-14","2026-01-15","2026-01-16","2026-01-19","2026-01-20","2026-01-21","2026-01-22","2026-01-23","2026-01-26","2026-01-27","2026-01-28","2026-01-29","2026-01-30","2026-02-02","2026-02-03","2026-02-04","2026-02-05","2026-02-06","2026-02-09","2026-02-10","2026-02-11","2026-02-12","2026-02-13","2026-02-23","2026-02-24","2026-02-25","2026-02-26","2026-02-27","2026-03-02","2026-03-03","2026-03-04","2026-03-05","2026-03-06","2026-03-09","2026-03-10","2026-03-11","2026-03-12","2026-03-13","2026-03-16","2026-03-17","2026-03-18","2026-03-19","2026-03-20","2026-03-23","2026-03-24","2026-03-25","2026-03-26","2026-03-27","2026-03-30","2026-03-31","2026-04-01","2026-04-02","2026-04-03","2026-04-06","2026-04-07","2026-04-08","2026-04-09","2026-04-10","2026-04-13","2026-04-14","2026-04-15","2026-04-16","2026-04-17","2026-04-20","2026-04-21","2026-04-22","2026-04-23","2026-04-24","2026-04-28","2026-04-29","2026-05-04","2026-05-05","2026-05-06","2026-05-07","2026-05-08","2026-05-11","2026-05-12","2026-05-13","2026-05-14","2026-05-15","2026-05-18","2026-05-19","2026-05-20","2026-05-21","2026-05-22","2026-05-25","2026-05-26","2026-05-27","2026-05-28","2026-05-29","2026-06-01","2026-06-02","2026-06-03","2026-06-04","2026-06-05","2026-06-08","2026-06-09","2026-06-10","2026-06-11","2026-06-12","2026-06-15","2026-06-16","2026-06-17","2026-06-18","2026-06-19","2026-06-22","2026-06-23","2026-06-24","2026-06-25","2026-06-26","2026-06-29","2026-06-30","2026-07-01","2026-07-02","2026-07-03","2026-07-06","2026-07-07","2026-07-08","2026-07-09","2026-07-10","2026-07-13","2026-07-14","2026-07-15","2026-07-16","2026-07-17","2026-07-20","2026-07-21","2026-07-22","2026-07-23","2026-07-24","2026-07-27","2026-07-28","2026-07-29","2026-07-30","2026-07-31","2026-08-03","2026-08-04","2026-08-05","2026-08-06","2026-08-07","2026-08-10","2026-08-11","2026-08-12","2026-08-13","2026-08-14","2026-08-17","2026-08-18","2026-08-19","2026-08-20","2026-08-21","2026-08-24","2026-08-25","2026-08-26","2026-08-27","2026-08-28","2026-09-03","2026-09-04","2026-09-07","2026-09-08","2026-09-09","2026-09-10","2026-09-11"],"bench":{"VN100":[1912.69,1935.93,1973.69,1956.73,1944.22,1961.77,1976.38,1950.48,1935.22,1956.26,1971.81,1964.23,1954.03,1961.84,1956.64,1909.38,1893.38,1869.14,1881.82,1895.4,1869.17,1872.59,1861.24,1847.81,1817.49,1819.63,1826.92,1879.24,1895.81,1904.16,1927.92,1936.82,1932.71,1952.69,1948.72,1903.5,1864.78,1856.66,1850.66,1817.73,1699.6,1740.71,1796.23,1776.44,1772.56,1772.6,1788.73,1783.56,1771.74,1726.81,1664.96,1696.93,1744.4,1728.57,1759.1,1749.23,1767.05,1792.16,1781.33,1766.97,1760.97,1769.19,1856.15,1843.49,1856.76,1860.33,1878.19,1892.92,1908.08,1907.34,1927.96,1925.79,1943.91,1944.05,1930.67,1952.67,1936.31,1928.89,1944.47,1967.64,1992.48,1997.02,1978.37,1988.39,1976.98,1996.22,1982.89,1978.45,1965.64,1958.35,1952.0,1937.14,1950.39,1956.87,1951.75,1933.02,1925.55,1915.27,1894.18,1893.09,1902.15,1904.58,1859.67,1871.55,1881.42,1871.39,1865.93,1882.63,1887.98,1887.29,1899.67,1894.86,1915.25,1928.14,1940.44,1932.68,1937.79,1933.17,1931.52,1942.19,1938.99,1932.28,1914.29,1922.44,1926.12,1908.47,1891.94,1861.08,1868.47,1839.44,1864.31,1852.65,1805.16,1797.8,1743.88,1767.7,1751.49,1729.22,1745.18,1762.6,1800.95,1786.9,1825.3,1841.63,1836.22,1822.07,1823.7,1838.02,1837.69,1850.94,1824.51,1795.69,1793.86,1791.35,1788.39,1795.57,1837.77,1853.99,1851.76,1879.52,1888.06,1891.44,1874.2,1894.93,1870.98,1873.51,1869.84,1876.33,1838.59],"VN30":[2028.68,2055.96,2096.76,2074.03,2066.21,2080.24,2089.21,2067.1,2047.48,2080.35,2094.24,2085.61,2080.38,2082.35,2077.76,2032.28,2019.88,1997.13,2018.98,2029.81,2004.31,1997.69,1988.19,1969.27,1943.6,1947.75,1951.58,2000.9,2016.47,2018.64,2039.8,2050.85,2049.64,2069.82,2061.75,2010.75,1959.35,1956.53,1942.76,1904.19,1780.71,1836.96,1889.94,1859.8,1853.6,1852.99,1873.65,1868.84,1854.19,1797.99,1741.05,1770.16,1814.73,1791.25,1821.53,1811.92,1829.59,1861.84,1852.99,1837.43,1836.25,1840.96,1931.01,1915.01,1928.23,1925.66,1946.55,1961.6,1979.19,1988.11,2009.04,2007.08,2025.41,2024.74,2011.42,2041.4,2022.75,2014.62,2032.3,2053.41,2079.1,2074.06,2040.51,2053.97,2043.51,2068.62,2050.58,2046.37,2027.45,2028.94,2027.51,2010.93,2021.72,2027.9,2022.46,1999.82,1997.06,1989.71,1972.99,1974.6,1982.29,1986.28,1936.81,1951.92,1960.97,1947.28,1944.36,1962.48,1960.19,1957.17,1967.22,1963.57,1980.13,1995.12,2010.15,2004.62,2008.57,2004.29,1995.71,2013.35,2009.04,2002.56,1991.11,1995.91,1998.44,1987.11,1970.82,1939.84,1946.06,1916.05,1941.65,1931.65,1887.32,1881.32,1826.9,1845.32,1829.36,1806.5,1824.35,1849.12,1886.27,1872.07,1917.69,1927.35,1916.88,1902.79,1911.09,1925.18,1922.53,1936.46,1909.23,1876.81,1877.68,1876.14,1875.73,1887.06,1927.79,1942.0,1936.15,1970.01,1979.23,1982.96,1961.57,1984.89,1963.01,1968.52,1967.64,1976.82,1936.69],"VNINDEX":[1788.4,1816.27,1861.58,1855.56,1867.9,1877.33,1902.93,1894.44,1864.8,1879.13,1896.59,1893.78,1885.44,1882.73,1870.79,1843.72,1830.5,1802.91,1814.98,1829.04,1806.5,1813.4,1791.43,1782.56,1755.49,1754.82,1754.03,1796.85,1814.09,1824.09,1860.14,1867.62,1860.91,1879.64,1880.33,1846.1,1813.14,1818.27,1808.51,1767.84,1652.79,1676.73,1728.34,1709.61,1696.24,1693.21,1710.29,1713.83,1699.13,1647.81,1591.17,1614.77,1658.19,1644.63,1672.8,1662.54,1674.49,1702.93,1694.82,1684.04,1674.99,1677.54,1756.55,1736.68,1750.0,1758.96,1775.65,1800.65,1819.83,1817.17,1837.11,1833.48,1857.3,1870.36,1853.29,1875.84,1854.1,1854.06,1874.85,1891.2,1909.01,1915.37,1895.5,1901.1,1898.37,1925.46,1921.6,1927.94,1912.93,1913.23,1896.89,1877.13,1886.03,1884.18,1874.43,1863.67,1863.49,1844.54,1826.47,1819.01,1831.55,1838.9,1790.53,1793.05,1803.71,1798.61,1791.65,1799.31,1807.94,1806.2,1830.47,1824.53,1857.91,1869.04,1878.02,1863.07,1871.91,1854.97,1860.01,1867.21,1866.35,1862.08,1843.5,1848.25,1853.7,1840.7,1828.34,1800.54,1806.63,1782.12,1804.24,1787.45,1743.51,1730.56,1668.53,1699.38,1686.11,1669.01,1680.62,1704.68,1744.66,1735.78,1762.84,1777.23,1776.46,1764.78,1768.06,1776.77,1773.41,1793.18,1765.63,1729.08,1727.46,1732.02,1726.69,1734.24,1768.12,1788.78,1791.41,1821.32,1831.56,1832.12,1827.72,1853.08,1821.64,1830.44,1827.12,1829.23,1795.21]},"config":{"brokerage_bps":10.0,"sell_tax_bps":10.0,"lag_sessions":1,"risk_free_rate":0.0},"portfolios":{"financial_test":{"anchor":"2026-09-11","freq":"1M","drift":0.08,"holdings":{"min":5,"max":10},"constraints":"stock 20.00% (3 at max)","tactical":"off","names":["DGW","HCM","MBB","SSI","TCB","TCX","VPB"],"groups":["Consumer Retail","Financial Services","Banks - State","Financial Services","Banks - Private","Financial Services","Banks - Private"],"ret":[[0.0,0.0,0.0,0.0,0.0,0.0,0.0],[0.01199041,0.0,0.05128214,0.01715223,0.03004292,0.03820959,0.03405],[0.01777239,0.02298885,0.00187634,0.01517728,0.01111111,0.0262881,0.01386482],[-0.04074494,0.01123585,-0.00374565,0.01495037,-0.01098901,0.03688523,0.0],[0.01941748,0.00444451,0.02631623,-0.00654664,0.01805556,0.00790513,-0.03418804],[0.04047619,0.06858377,0.03296673,0.06919232,0.03683492,0.05098037,0.06902674],[-0.00572071,0.05590072,-0.02304946,0.00924538,-0.01710526,-0.00373134,0.00993377],[0.0149596,0.0392158,-0.01451897,0.01832061,-0.0227577,-0.01123595,-0.03278689],[-0.02494331,-0.01698116,0.0036831,-0.02098988,-0.02465753,-0.02840908,-0.01694915],[0.06976744,0.0172745,-0.00733964,0.0,0.00561798,0.01364522,-0.00344828],[0.00326076,-0.0226414,0.01663594,0.0,0.01396648,0.0,0.02595138],[0.01625147,-0.01544424,-0.00363623,-0.0015312,-0.00964187,-0.00384615,0.00337303],[-0.02238795,-0.06862731,-0.01459846,-0.02760736,-0.00417246,0.01351351,-0.02352975],[-0.01853882,-0.00421059,-0.00185201,0.00630915,0.00558659,0.00380952,0.00516369],[0.01666655,0.0,0.0,0.0,0.01388889,0.05502844,-0.0239726],[-0.03278667,-0.03171269,-0.03153989,-0.02821317,-0.02328767,0.0,-0.02631561],[0.02146881,0.01965069,0.01532558,-0.00483891,-0.01963534,-0.01079136,0.00180162],[-0.02654867,0.00428272,0.00188696,0.0032419,-0.01287554,-0.00363636,-0.00179838],[0.0693183,0.00639643,0.00564974,0.00646203,0.0115942,0.00364963,-0.00360397],[0.04144516,-0.00211843,0.01872637,0.0,0.0286533,0.02727272,0.01265841],[0.06938776,0.00636927,0.00367679,-0.01123615,-0.02506964,-0.01415929,-0.01428571],[0.06870229,0.00843894,0.01465193,0.00324675,-0.00857143,0.00179533,-0.00362319],[0.0,0.00836832,0.00360997,0.0210358,-0.00432277,0.0,0.00909109],[-0.04464286,-0.02320436,-0.02697855,-0.01743284,0.00868307,0.0,-0.01261279],[0.0,-0.02807775,0.01109063,-0.03548387,-0.0071736,-0.01612903,-0.02189781],[-0.02429907,0.01777778,0.00914066,-0.01003344,0.00433526,0.00546448,-0.00186548],[-0.06992347,-0.00436681,0.00905832,0.01182454,-0.00431655,-0.01268115,-0.00560767],[0.03810516,0.02631579,0.04129268,0.04173601,0.02023121,0.0238532,0.06390977],[0.00396825,-0.0042735,-0.02241404,0.00160236,0.00424929,0.00358423,-0.00176696],[-0.00197628,0.01287554,-0.00176382,0.0048002,0.0,0.0392857,0.00177009],[0.02376238,0.01271186,0.00176694,0.00636943,0.0112835,0.05670101,0.01766784],[0.00967118,0.0083682,-0.00352721,0.01582278,-0.0013947,0.02276422,0.00694444],[0.00191571,0.00207469,0.0176989,0.00155783,0.00558659,-0.01430842,-0.00517259],[0.01338432,0.0,0.00173928,0.00777585,0.0125,0.01612903,0.00173328],[-0.03396226,0.00414079,-0.01041672,0.0,-0.00548697,0.0079365,0.00173028],[-0.04882812,-0.0371134,-0.02982456,-0.0169755,-0.04413793,-0.01732283,-0.03108843],[-0.05646828,0.0235546,-0.02169992,0.02354808,-0.03030303,-0.00961538,-0.02139038],[0.00108825,0.0292887,-0.00369672,0.03374233,-0.0327381,0.00323624,-0.01092859],[0.0,-0.00406504,0.00371044,-0.00593472,-0.00923077,-0.03225805,-0.00552505],[-0.02717402,-0.04693878,-0.01293876,-0.05970149,-0.02329193,-0.06999997,-0.01296315],[-0.06927352,-0.06852248,-0.0692884,-0.06984127,-0.06995231,-0.06989244,-0.06941821],[0.01560612,0.01149425,0.06841045,0.01194518,0.03589744,0.01734103,0.02822581],[0.06974007,0.02954545,0.00941608,0.02023609,0.02640264,0.05303028,0.0372547],[-0.02430962,-0.03090508,-0.02052233,-0.03636323,-0.03536977,-0.04496401,-0.02646465],[-0.02265006,-0.01366743,-0.00380938,-0.0257292,0.0,-0.0687382,-0.00388389],[-0.00115863,0.00461894,-0.00191221,0.0,0.00666667,0.02527805,-0.00584776],[0.01856148,0.0045977,0.00957843,0.0088026,0.00331126,0.0690335,0.00784314],[-0.00455581,-0.01830664,-0.00189723,-0.0226874,0.0,-0.02952028,-0.00389105],[-0.00457666,-0.04195804,0.00380214,-0.03571429,-0.00825083,-0.00380228,0.0],[-0.03448276,-0.00243309,-0.01704554,-0.00185162,-0.00665557,-0.06774806,-0.02148457],[-0.03333333,-0.06829268,-0.03660872,-0.05751413,-0.0318258,0.0399181,-0.04191597],[0.04187192,0.03403141,0.02400011,0.01968504,0.03287197,-0.00393701,0.05208312],[0.03073286,0.06835443,0.01562491,0.0366793,0.0318258,0.04743081,0.04158437],[0.03211009,0.03080569,-0.0076925,-0.01862151,-0.0211039,-0.01320754,-0.00380228],[0.01111111,0.02298851,0.01356612,0.02656498,0.01658375,0.00573614,0.00954179],[0.00659341,0.00224719,-0.01529676,-0.01848383,-0.00489396,-0.00380228,-0.01323232],[0.0,0.01793722,0.02718493,0.01506591,0.00655738,-0.02290075,0.02298851],[0.00436681,0.03524229,0.00189005,0.03525022,0.00325733,0.01367187,0.00374532],[-0.00108707,0.00425532,-0.00754689,-0.01254458,-0.01461039,-0.01734103,-0.02052258],[-0.0446136,0.02330508,-0.0133082,-0.01996392,-0.01976936,-0.01568627,-0.01714267],[-0.00455581,-0.00621118,-0.01156075,-0.00185162,-0.02352941,-0.02390437,-0.00775194],[-0.01716259,0.01041667,-0.001949,0.02040793,-0.01204819,-0.01031344,0.01757793],[0.06519209,0.04742268,0.03906203,0.06909091,0.06968641,0.06875,0.05950117],[0.00983618,-0.00787402,-0.00375926,-0.02210863,0.00651466,0.00779727,-0.01811594],[-0.01190465,0.00396825,0.00754736,-0.00521761,0.04368932,-0.00193424,0.00738007],[-0.0010954,0.02371542,-0.00936318,-0.00699301,-0.01085271,-0.00193798,-0.01465201],[0.0,0.0019305,0.00945168,0.01056338,0.00470219,0.01941748,0.01672881],[-0.02083322,0.03468208,-0.00374565,0.0,-0.00624025,-0.00952381,0.0],[0.01231791,0.0,-0.01127778,0.00522626,0.00156986,-0.01923077,0.00914058],[0.01659281,0.00558659,0.00570345,-0.01039818,0.01097179,0.01176471,0.02355054],[0.00108825,0.03518519,-0.00378105,0.0140105,0.01085271,-0.00193798,-0.00707965],[-0.01086957,-0.02325581,-0.00189723,-0.02245272,0.00306748,-0.00970874,-0.01782495],[0.0021978,-0.0018315,-0.00380262,-0.00530013,0.00917431,-0.00392157,0.0],[-0.02192982,-0.01651376,0.00763378,-0.00710479,0.00909091,-0.00787402,-0.00544483],[-0.00224215,-0.02238806,-0.00757595,-0.00894477,0.02852853,-0.00198413,-0.00547464],[-0.03370787,0.02099237,-0.00763331,-0.00180528,0.01021898,0.01590457,-0.00917413],[0.01046524,0.0,0.00192277,0.0,-0.0216763,-0.00978474,-0.01851852],[0.00115063,-0.01495327,0.00191956,0.00180854,-0.00886263,-0.0167983,0.01698132],[0.0,0.00948767,-0.00574715,-0.01444043,-0.00745156,0.00301495,0.03896084],[0.0,0.06954887,0.00385342,0.04395604,0.01801802,0.0260521,0.0],[0.01609195,-0.00878735,0.00191956,-0.00526294,-0.00589971,0.00585938,0.00535732],[-0.02036199,-0.00886525,0.00191588,-0.00176389,0.00445104,-0.01165049,-0.00710479],[-0.04157044,-0.01431127,-0.00573616,0.0,-0.0014771,-0.01178782,-0.00536691],[0.01807241,0.00544465,-0.00384649,-0.00883414,0.0,0.00198807,0.00179838],[0.00366848,0.02888087,-0.00386086,-0.00891243,-0.00591716,-0.00892845,-0.0035903],[0.02415459,-0.00877193,0.00193816,0.01079137,0.01190476,0.0210209,0.03243206],[0.0,0.01769912,-0.00773714,-0.00711744,0.00147059,0.00392157,-0.02126641],[-0.00943396,0.02956522,-0.00584798,0.0089608,-0.00146843,-0.01367188,-0.00362976],[-0.00238095,0.01351351,-0.01764715,-0.01243361,-0.02100926,0.00594059,-0.02550091],[-0.02505967,-0.01333333,-0.01796366,-0.0197844,-0.00460123,-0.01181102,-0.00186916],[0.02080783,-0.02364865,0.00812978,-0.00550436,-0.00616333,0.0,0.01123596],[-0.01079137,-0.01384083,-0.00604842,0.0166054,-0.00155039,0.01593625,-0.00740741],[-0.00606061,-0.0122807,0.00608522,-0.00363022,0.01086957,0.02121732,0.00746269],[0.01097561,-0.01243339,0.02822578,0.02003666,0.01075269,-0.00115207,0.02222222],[0.00603136,-0.01079137,-0.00392142,-0.00357143,0.02279635,-0.00807382,0.01630435],[-0.00239808,0.00181818,-0.01574794,-0.01254458,-0.03120357,-0.02790698,-0.02673797],[-0.01802885,-0.00362976,0.0,-0.00181511,0.00460123,0.00478469,-0.00732601],[-0.02080783,-0.01092896,0.00399985,-0.00181841,-0.01221374,-0.01190476,-0.00553506],[-0.015,-0.01841621,-0.01792837,-0.01639322,-0.01391036,-0.02891566,-0.01855288],[0.02664975,0.02439024,0.02231231,0.01111111,-0.01097179,0.0,0.0],[-0.00865266,0.0018315,-0.00793622,-0.00732601,-0.00316957,0.0,0.00189036],[-0.00498753,-0.01279707,0.0,-0.00369004,0.00794913,-0.01240695,-0.00188679],[-0.01002506,0.01296296,-0.01599991,-0.02407384,-0.02681388,-0.0201005,-0.03213611],[-0.01392405,0.00365631,0.00203219,0.00569236,0.00162075,-0.01282051,0.01171875],[0.01026958,0.01275046,0.00202858,0.00188703,0.00161812,-0.0025974,0.00579151],[-0.00508259,-0.01258993,0.00202447,-0.00941643,-0.00323102,0.0,-0.00191939],[-0.0063857,-0.01639344,0.00404025,-0.00570318,0.01296596,-0.0078125,0.0],[0.03341902,0.01666667,0.01408424,0.03441634,0.0144,0.06955381,0.00961538],[0.02736318,0.01457195,-0.00396811,0.02033295,0.00157729,0.06748466,0.00380952],[0.01694915,-0.01256732,0.00398392,0.00362319,-0.00944882,-0.01149425,0.0056926],[-0.02380952,0.03454545,0.0019843,-0.00722022,-0.00794913,-0.02209302,-0.00377358],[-0.01829268,-0.00702988,-0.00990087,-0.01272705,-0.00801282,0.02140309,-0.01893939],[0.00869565,0.00353982,-0.0080002,0.00184139,-0.00161551,0.00465658,0.003861],[-0.03694581,-0.02821869,0.0,-0.01286788,0.03721683,0.00579374,0.02115385],[0.00383632,-0.0199637,0.0,-0.00558636,0.01404056,0.02073733,0.0],[0.01273885,-0.00185185,-0.00403211,-0.00749064,0.02769231,0.01580135,0.00564972],[-0.0163522,-0.00185529,0.00202447,-0.00377358,0.0,0.0,0.00187266],[0.02941176,0.00185874,0.01414114,0.00757576,0.01197605,-0.01333333,0.01121495],[-0.00124224,0.00927644,0.00398392,0.00563933,-0.00887574,0.0,-0.00184843],[-0.00248756,0.03308824,0.02182534,0.01682219,0.0238806,0.01013514,0.02592593],[0.00249377,0.03202847,-0.00388335,-0.00367647,-0.01311953,0.00334448,0.0],[0.00124378,-0.01551724,-0.001949,0.00922532,-0.00738552,0.0,0.00361011],[-0.0310559,-0.0262697,-0.0117188,-0.02193784,0.00446429,-0.03333333,-0.01258993],[0.01025641,0.02877698,0.01778615,0.01495327,0.00296296,0.02873563,0.00546448],[0.00126904,-0.01398601,0.00970911,0.00184139,-0.00295421,-0.01005587,0.00543478],[-0.01520913,-0.0035461,-0.01596078,-0.00919095,-0.01777778,-0.01467269,-0.01801802],[-0.00900901,-0.01067616,0.00203252,-0.0148423,-0.02262443,-0.03321879,-0.02018349],[0.0012987,-0.00719424,-0.00811359,-0.03389877,-0.00154321,-0.01066351,-0.01123596],[0.01167315,-0.01811594,0.00408998,-0.00389815,-0.00463679,0.00479042,0.00378788],[-0.03076923,-0.00369004,-0.02443992,-0.03326834,-0.02173913,0.02026222,-0.02641509],[0.00529101,0.0696152,0.00835073,0.01214575,0.01269841,0.01635514,0.00775194],[-0.01578947,0.02008032,-0.01656315,-0.03000025,-0.01410658,-0.0091954,-0.00576923],[-0.06016043,0.01377953,-0.04,-0.06391728,-0.04769475,-0.03016241,-0.03288201],[0.0113798,0.0,-0.00438596,0.02202643,-0.00500835,-0.00956938,0.014],[-0.0323488,-0.01747573,-0.0154185,-0.02370717,-0.02684564,-0.0205314,-0.01380671],[0.01017442,0.0256917,-0.01342282,0.03973566,0.00862069,0.0135635,0.0],[-0.03597122,-0.01348748,-0.00680272,-0.03184739,-0.02222222,-0.04622871,-0.002],[-0.01044776,-0.0234375,-0.01141553,-0.03508772,-0.01223776,-0.04336735,-0.01603206],[0.02413273,0.012,0.02309469,0.04545455,0.00884956,0.016,0.00203666],[0.04123711,-0.00197628,-0.00225734,0.01086929,-0.00350877,0.0144357,-0.0101626],[0.03253182,0.01782178,0.01809955,0.03225834,0.03169014,0.05045278,0.02669405],[0.00273973,-0.02723735,0.0,-0.01874974,-0.01194539,0.00985222,-0.008],[0.01229508,0.006,0.06666667,0.04246283,0.03454231,-0.00243902,0.02822581],[0.06882591,-0.00198807,0.01666667,0.0,-0.01001669,-0.00611247,0.00588235],[-0.01136364,0.01792829,-0.00409836,-0.00611023,0.0,-0.02583026,-0.00584795],[0.02171137,-0.00391389,-0.01646091,-0.00409836,-0.01517707,-0.00505051,-0.01372549],[-0.015,-0.00392927,0.01046025,0.00617258,0.01712329,-0.00253807,-0.00596421],[0.02284264,0.02366864,0.00414079,0.02658513,0.05555556,0.0178117,0.034],[0.02109181,0.02119461,0.00741327,0.00199228,-0.01116427,0.02,-0.01353965],[-0.0036452,-0.01320755,0.004914,0.00596396,0.01612903,-0.00735294,0.00784314],[0.05243902,-0.01720841,-0.01466993,-0.01185771,0.00634921,-0.01234568,-0.01361868],[-0.03592121,-0.01945525,-0.00744417,-0.02,0.00946372,-0.02125,-0.00986193],[-0.00721154,0.00396825,-0.005,0.01108878,-0.00625,0.00127714,-0.01394422],[0.00484262,-0.00790514,0.00251256,-0.01515152,-0.02987421,0.01530612,0.00606061],[0.02891566,-0.00996016,0.0,-0.00512821,0.00486224,-0.00879397,-0.00200803],[0.0,0.01006036,0.01754386,0.0,0.0,0.00126743,0.00201207],[0.00702576,0.04780876,0.0270936,0.06958763,0.02096774,0.03797468,0.03212851],[-0.00465116,-0.00190114,-0.00479616,0.02409639,-0.00631912,-0.00487805,0.02529183],[-0.01168224,0.0,-0.00481928,0.0,-0.00476948,-0.0122549,0.00189753],[-0.00118203,0.00952381,0.01937046,0.01882353,0.0686901,0.03598015,0.01325758],[0.02011834,0.0,0.0,-0.01154734,0.01943199,-0.02275449,0.02429907],[-0.02088167,-0.01698113,0.0,-0.00233645,-0.02052786,0.0,0.01459854],[-0.03080569,0.0,-0.02137767,-0.02107728,-0.03892216,-0.03431373,-0.03057554],[-0.0207824,0.0134357,-0.00242718,0.00717703,0.01557632,0.02538071,0.03153989],[0.04369538,0.0,-0.01703163,-0.00950119,-0.02147239,-0.01732673,-0.01798561],[0.00358852,0.00378788,-0.00247525,0.00719424,0.0015674,0.00755668,0.003663],[-0.00238379,-0.00566038,0.00248139,-0.0047619,0.01408451,0.0,0.0],[0.0692951,-0.00189753,-0.0049505,0.00478469,0.0,-0.01,0.00364964],[-0.00782123,-0.03041825,-0.01741294,-0.03333333,-0.02469136,-0.03787879,-0.02]],"target":[[0.183927234,0.03234597,0.2,0.139994815,0.2,0.043731981,0.2],[0.184185933,0.03170962,0.2,0.139594707,0.2,0.044509739,0.2],[0.183996993,0.031873606,0.2,0.139245174,0.2,0.044884227,0.2],[0.181174489,0.032045325,0.2,0.140509554,0.2,0.046270632,0.2],[0.181185678,0.032246768,0.2,0.139845636,0.2,0.046721919,0.2],[0.177100077,0.032952781,0.2,0.14298883,0.2,0.046958312,0.2],[0.174821349,0.034685487,0.2,0.14385713,0.2,0.046636035,0.2],[0.17354506,0.035699595,0.2,0.145086073,0.2,0.045669272,0.2],[0.172534612,0.036037524,0.2,0.145862239,0.2,0.045565625,0.2],[0.177203247,0.035712267,0.2,0.142091207,0.2,0.044993278,0.2],[0.176891745,0.0350798,0.2,0.142808154,0.2,0.0452203,0.2],[0.176993842,0.034667412,0.2,0.14312362,0.2,0.045215126,0.2],[0.178784095,0.032872135,0.2,0.141688968,0.2,0.046654802,0.2],[0.178862023,0.032584727,0.2,0.141933889,0.2,0.04661936,0.2],[0.178256491,0.032299253,0.2,0.14069041,0.2,0.048753846,0.2],[0.180190786,0.031716395,0.2,0.138650838,0.2,0.049441982,0.2],[0.181438872,0.032241265,0.2,0.137560209,0.2,0.048759655,0.2],[0.183145227,0.032066884,0.2,0.136674358,0.2,0.04811353,0.2],[0.18804178,0.031360524,0.2,0.133672428,0.2,0.046925267,0.2],[0.190145077,0.030807193,0.2,0.131592683,0.2,0.047455048,0.2],[0.188477223,0.036756028,0.2,0.128547069,0.2,0.04621968,0.2],[0.186258248,0.037312075,0.2,0.129819881,0.2,0.046609796,0.2],[0.185845939,0.037167725,0.2,0.130942167,0.2,0.046044169,0.2],[0.18524993,0.03643968,0.2,0.131315648,0.2,0.046994741,0.2],[0.185510468,0.036467282,0.2,0.130413724,0.2,0.047608525,0.2],[0.187344038,0.036867065,0.2,0.128240743,0.2,0.047548155,0.2],[0.185596133,0.036877299,0.2,0.13036239,0.2,0.047164178,0.2],[0.185374481,0.036600377,0.2,0.131327452,0.2,0.04669769,0.2],[0.186557537,0.036205726,0.2,0.130678034,0.2,0.046558703,0.2],[0.185231807,0.036401254,0.2,0.130336249,0.2,0.04803069,0.2],[0.182667252,0.036619373,0.2,0.13029607,0.2,0.050417305,0.2],[0.181453418,0.036540924,0.2,0.130978118,0.2,0.05102754,0.2],[0.182709746,0.036481409,0.2,0.130697316,0.2,0.050111529,0.2],[0.182753567,0.036170334,0.2,0.13059051,0.2,0.05048559,0.2],[0.181677472,0.036407764,0.2,0.130905684,0.2,0.05100908,0.2],[0.182117299,0.035715038,0.2,0.131100665,0.2,0.051066998,0.2],[0.178816596,0.036533718,0.2,0.134104948,0.2,0.050544738,0.2],[0.176969588,0.0369556,0.2,0.136240515,0.2,0.049834297,0.2],[0.173833095,0.037757432,0.2,0.138935235,0.2,0.049474238,0.2],[0.170702111,0.038803752,0.2,0.140873276,0.2,0.049620861,0.2],[0.170681671,0.038853373,0.2,0.140853716,0.2,0.04961124,0.2],[0.174167766,0.038204482,0.2,0.13856309,0.2,0.049064663,0.2],[0.176998379,0.037747971,0.2,0.135669433,0.2,0.049584217,0.2],[0.177282445,0.037952363,0.2,0.135635722,0.2,0.04912947,0.2],[0.175985712,0.038942994,0.2,0.137474139,0.2,0.047597155,0.2],[0.174450091,0.039149354,0.2,0.137567201,0.2,0.048833354,0.2],[0.173103831,0.03874604,0.2,0.136719903,0.2,0.051430226,0.2],[0.175331731,0.038569169,0.2,0.135488441,0.2,0.050610659,0.2],[0.176538361,0.037873383,0.2,0.133911312,0.2,0.051676944,0.2],[0.174486239,0.038795051,0.2,0.137250034,0.2,0.049468677,0.2],[0.172511217,0.037902309,0.2,0.135642955,0.2,0.053943519,0.2],[0.173186615,0.038442521,0.2,0.135667477,0.2,0.052703388,0.2],[0.173482219,0.039267488,0.2,0.134470242,0.2,0.05278005,0.2],[0.172790733,0.04096084,0.2,0.133543096,0.2,0.052705331,0.2],[0.173930369,0.04083121,0.2,0.133585934,0.2,0.051652487,0.2],[0.174836125,0.041228406,0.2,0.132095321,0.2,0.051840148,0.2],[0.174597433,0.041726571,0.2,0.133314332,0.2,0.050361663,0.2],[0.172986775,0.042221096,0.2,0.134895379,0.2,0.04989675,0.2],[0.172494199,0.042942561,0.2,0.134905224,0.2,0.049658017,0.2],[0.171524864,0.044615222,0.2,0.1342335,0.2,0.049626415,0.2],[0.170437543,0.044885445,0.2,0.135638911,0.2,0.0490381,0.2],[0.16704555,0.045579393,0.2,0.139097945,0.2,0.048277113,0.2],[0.166762512,0.044890835,0.2,0.139830697,0.2,0.048515956,0.2],[0.167809356,0.044928195,0.2,0.137939137,0.2,0.049323312,0.2],[0.168654209,0.045065952,0.2,0.137096161,0.2,0.049183677,0.2],[0.168376352,0.04618718,0.2,0.136292279,0.2,0.049144189,0.2],[0.168254681,0.045809551,0.2,0.136342671,0.2,0.049593098,0.2],[0.167085794,0.047408994,0.2,0.13637337,0.2,0.049131843,0.2],[0.169531439,0.046957982,0.2,0.135781993,0.2,0.047728586,0.2],[0.174878978,0.046308032,0.199681791,0.131774052,0.2,0.047357146,0.2],[0.175619911,0.047227757,0.198944397,0.131642251,0.2,0.046565685,0.2],[0.174973257,0.046984912,0.2,0.131073059,0.2,0.046968772,0.2],[0.175699683,0.046948791,0.2,0.130517135,0.2,0.046834391,0.2],[0.17416066,0.046923638,0.2,0.131695192,0.2,0.047220511,0.2],[0.172864889,0.04661563,0.2,0.132629847,0.2,0.047889634,0.2],[0.174074436,0.047029994,0.2,0.130821012,0.2,0.048074558,0.2],[0.172944129,0.047363901,0.2,0.131749825,0.2,0.047942145,0.2],[0.174403015,0.04661773,0.2,0.131880779,0.2,0.047098476,0.2],[0.175177742,0.047174463,0.2,0.130292436,0.2,0.047355359,0.2],[0.172109705,0.048915584,0.2,0.131868498,0.2,0.047106213,0.2],[0.172705887,0.048539495,0.2,0.131319867,0.2,0.047434752,0.2],[0.171270699,0.048673039,0.2,0.13262467,0.2,0.047431591,0.2],[0.169227178,0.048672303,0.2,0.134548219,0.2,0.047552301,0.2],[0.170154598,0.04891637,0.2,0.133302577,0.2,0.047626454,0.2],[0.170218592,0.050359049,0.2,0.132193069,0.2,0.04722929,0.2],[0.170476659,0.049435774,0.2,0.132330646,0.2,0.047756921,0.2],[0.168066344,0.050812423,0.2,0.132698949,0.2,0.048422285,0.2],[0.164022316,0.052765197,0.2,0.13504095,0.2,0.048171536,0.2],[0.16342258,0.053769054,0.2,0.134087151,0.2,0.048721215,0.2],[0.164197352,0.053775147,0.2,0.133225584,0.2,0.048801916,0.2],[0.166042445,0.052539362,0.2,0.132582886,0.2,0.048835308,0.2],[0.165291109,0.051482869,0.2,0.133927793,0.2,0.049298229,0.2],[0.164511284,0.051035755,0.2,0.133927488,0.2,0.050525473,0.2],[0.163691917,0.050152617,0.2,0.135937119,0.2,0.050218347,0.2],[0.165733426,0.049482692,0.2,0.13510022,0.2,0.049683661,0.2],[0.165714499,0.0502179,0.2,0.135141824,0.2,0.048925777,0.2],[0.164965742,0.050237012,0.2,0.135439509,0.2,0.049357738,0.2],[0.166632729,0.049627556,0.2,0.13502887,0.2,0.048710845,0.2],[0.167440549,0.049507282,0.2,0.134979205,0.2,0.048072964,0.2],[0.166827437,0.050263356,0.2,0.13526415,0.2,0.047645057,0.2],[0.166721443,0.050573265,0.2,0.134854108,0.2,0.047851184,0.2],[0.167099278,0.050219469,0.2,0.135146045,0.2,0.047535208,0.2],[0.167569259,0.051555416,0.2,0.133668418,0.2,0.047206907,0.2],[0.167166356,0.051756966,0.2,0.134463237,0.2,0.046613441,0.2],[0.167299617,0.052209172,0.2,0.134183083,0.2,0.046308127,0.2],[0.166229756,0.052219922,0.2,0.13464209,0.2,0.046908233,0.2],[0.165838609,0.051891635,0.2,0.135249764,0.2,0.047019992,0.2],[0.166262344,0.050755718,0.2,0.13459878,0.2,0.048383159,0.2],[0.165607977,0.050191853,0.2,0.133859236,0.2,0.050340934,0.2],[0.165706539,0.049579391,0.2,0.134933377,0.2,0.049780692,0.2],[0.166081034,0.051289243,0.2,0.13395158,0.2,0.048678143,0.2],[0.165550205,0.051268588,0.2,0.133129366,0.2,0.05005184,0.2],[0.164555047,0.051523474,0.2,0.133564827,0.2,0.050356653,0.2],[0.164194591,0.050767378,0.2,0.133683728,0.2,0.051354303,0.2],[0.166231971,0.049469882,0.2,0.132178098,0.2,0.052120049,0.2],[0.165772666,0.049529983,0.2,0.131591068,0.2,0.053106283,0.2],[0.165820352,0.04955252,0.2,0.131397927,0.2,0.053229202,0.2],[0.166240241,0.049475787,0.2,0.131943107,0.2,0.052340865,0.2],[0.165228062,0.049894193,0.2,0.132579388,0.2,0.052298357,0.2],[0.165351421,0.05056787,0.2,0.132253865,0.2,0.051826845,0.2],[0.165277161,0.051914892,0.2,0.131079379,0.2,0.051728568,0.2],[0.162094716,0.051711061,0.2,0.13384612,0.2,0.052348103,0.2],[0.16215007,0.051652197,0.2,0.134288529,0.2,0.051909203,0.2],[0.158732452,0.052795371,0.2,0.135416245,0.2,0.053055932,0.2],[0.160378971,0.051921767,0.2,0.135313268,0.2,0.052385993,0.2],[0.160890443,0.052104824,0.2,0.135021059,0.2,0.051983673,0.2],[0.159680229,0.052755331,0.2,0.136131055,0.2,0.051433385,0.2],[0.161167431,0.053280506,0.2,0.133788181,0.2,0.051763882,0.2],[0.16308059,0.052166804,0.2,0.132888368,0.2,0.051864238,0.2],[0.163405858,0.05269533,0.2,0.130249614,0.2,0.053649198,0.2],[0.169900667,0.056565664,0.2,0.122759374,0.2,0.050774294,0.2],[0.171866578,0.057967789,0.2,0.119626082,0.2,0.050539551,0.2],[0.173855828,0.060473327,0.2,0.115232132,0.2,0.050438713,0.2],[0.173607103,0.059994532,0.2,0.116837844,0.2,0.049560521,0.2],[0.168922291,0.061479094,0.2,0.11896967,0.2,0.050628946,0.2],[0.165824193,0.062026815,0.2,0.12167298,0.2,0.050476012,0.2],[0.164117034,0.063548097,0.2,0.122337202,0.2,0.049997667,0.2],[0.16477155,0.064045069,0.2,0.121823053,0.2,0.049360329,0.2],[0.163513734,0.063252166,0.2,0.124292187,0.2,0.048941913,0.2],[0.164414958,0.062376862,0.2,0.124149853,0.2,0.049058326,0.2],[0.164257102,0.061547721,0.2,0.124237071,0.2,0.049958107,0.2],[0.165601868,0.060430485,0.2,0.123046168,0.2,0.05092148,0.2],[0.167261855,0.055238724,0.2,0.127147204,0.2,0.050352218,0.2],[0.16742558,0.055189148,0.2,0.127286145,0.2,0.050099127,0.2],[0.169007798,0.056057284,0.2,0.126235251,0.2,0.048699666,0.2],[0.168134029,0.056288569,0.2,0.126732607,0.2,0.048844795,0.2],[0.167870875,0.0560254,0.2,0.127419395,0.2,0.04868433,0.2],[0.168159101,0.055935487,0.2,0.127577315,0.2,0.048328098,0.2],[0.168139394,0.056539065,0.2,0.126529098,0.2,0.048792443,0.2],[0.169075252,0.055651343,0.2,0.126962116,0.2,0.048311289,0.2],[0.170743647,0.055027595,0.2,0.12622259,0.2,0.048006169,0.2],[0.17121666,0.054951929,0.2,0.125979001,0.2,0.04785241,0.2],[0.173447663,0.055487139,0.2,0.122876241,0.2,0.048188957,0.2],[0.173030404,0.055532971,0.2,0.122079494,0.2,0.049357131,0.2],[0.173308794,0.055305508,0.2,0.122172832,0.2,0.049212865,0.2],[0.174420919,0.055436531,0.2,0.121242526,0.2,0.048900024,0.2],[0.17196094,0.055533669,0.2,0.123979432,0.2,0.048525959,0.2],[0.172605655,0.054637609,0.2,0.125156161,0.2,0.047600574,0.2],[0.17110342,0.055140014,0.2,0.126306999,0.2,0.047449567,0.2],[0.171151636,0.054554711,0.2,0.126117457,0.2,0.048176197,0.2],[0.171955868,0.05497634,0.2,0.12562396,0.2,0.047443832,0.2],[0.171455912,0.054454272,0.2,0.126284737,0.2,0.047805079,0.2],[0.170043481,0.055841975,0.2,0.126773383,0.2,0.047341162,0.2],[0.16964685,0.055993058,0.2,0.126331343,0.2,0.048028749,0.2],[0.16942227,0.056546576,0.2,0.126368026,0.2,0.047663128,0.2],[0.169277232,0.056433391,0.2,0.126543057,0.2,0.047746321,0.2],[0.169441746,0.056298928,0.2,0.126355616,0.2,0.04790371,0.2],[0.170648877,0.05589336,0.2,0.126285218,0.2,0.047172545,0.2],[0.172235248,0.055687077,0.2,0.125440862,0.2,0.046636813,0.2]],"errors":{},"gone":{}},"hsc_strat_high_growth":{"anchor":"2026-09-11","freq":"1Q","drift":0.05,"holdings":{"min":20,"max":30},"constraints":"off","tactical":"off","names":["ACB","CTG","DGW","GMD","HCM","HDB","HPG","MWG","NVL","PC1","PVT","TCB","TCX","VHM","VPB","VSC","VTP"],"groups":["Banks - Private","Banks - State","Consumer Retail","Logistics","Financial Services","Banks - Private","Steel","Consumer Retail","Real Estate - Residential","Construction Contractors","Logistics","Banks - Private","Financial Services","Real Estate - Residential","Banks - Private","Logistics","Logistics"],"ret":[[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],[0.0,0.01971831,0.01199041,-0.00330033,0.0,0.00345423,0.0,0.01601831,0.0,0.069869,0.0212766,0.03004292,0.03820959,0.0693816,0.03405,0.00510204,-0.00932635],[0.02708333,0.03453039,0.01777239,0.03807947,0.02298885,0.00172117,0.02504824,0.01126126,-0.01123596,0.02244898,0.06770833,0.01111111,0.0262881,0.05430183,0.01386482,0.04314721,0.06903763],[-0.0040568,0.0200267,-0.04074494,0.00478469,0.01123585,-0.01030928,-0.00751849,-0.02561247,0.00757576,-0.0239521,0.01219485,-0.01098901,0.03688523,-0.06956522,0.0,0.00243309,-0.02054794],[0.0,0.06675393,0.01941748,-0.01587302,0.00444451,-0.03125,-0.00757587,-0.01714286,-0.05639098,-0.02862986,-0.02168649,0.01805556,0.00790513,0.00647017,-0.03418804,-0.04126214,0.06993001],[0.03869654,0.01840491,0.04047619,0.01612903,0.06858377,0.01075269,0.04961844,0.01744186,0.01992032,0.01473684,-0.02955665,0.03683492,0.05098037,-0.07,0.06902674,0.04050633,0.06909438],[-0.02352941,-0.00481928,-0.00572071,-0.0015873,0.05590072,0.00886525,-0.00909115,-0.00457143,-0.00390625,0.00207469,0.0685282,-0.01710526,-0.00373134,0.02918587,0.00993377,0.06812652,0.00436678],[-0.01004016,0.00363196,0.0149596,0.00158983,0.0392158,-0.02811951,0.0,-0.01262916,0.01176471,0.0,-0.00712615,-0.0227577,-0.01123595,-0.05746269,-0.03278689,0.01366743,0.06956524],[0.01014199,-0.03498191,-0.02494331,0.00793651,-0.01698116,0.06871609,0.01284413,-0.02325581,-0.00775194,0.06004141,-0.01913876,-0.02465753,-0.02840908,-0.04988124,-0.01694915,-0.01348315,0.04796737],[-0.00200803,-0.01,0.06976744,0.00629921,0.0172745,-0.03722504,0.0,0.03571429,0.01953125,-0.0390625,0.00487805,0.00561798,0.01364522,0.03416667,-0.00344828,-0.00911162,-0.05352984],[0.01006036,0.01010101,0.00326076,-0.00156495,-0.0226414,0.01054482,0.00362304,-0.00344828,-0.00766284,-0.0203252,0.0,0.01396648,0.0,0.00725222,0.02595138,0.00229885,0.0],[-0.00199203,-0.00875,0.01625147,0.06896552,-0.01544424,0.00695652,-0.01624544,-0.00807382,-0.01544402,-0.01244813,-0.01456311,-0.00964187,-0.00384615,-0.016,0.00337303,0.06880734,0.02868857],[-0.00798403,0.01387137,-0.02238795,0.03372434,-0.06862731,0.00345423,-0.01651371,-0.00697674,-0.01176471,-0.02310924,0.00985222,-0.00417246,0.01351351,-0.00081301,-0.02352975,-0.03433476,-0.02788849],[0.0,-0.00746269,-0.01853882,-0.0070922,-0.00421059,0.00516351,0.0018658,0.01288056,0.01587302,0.03655914,0.01707344,0.00558659,0.00380952,-0.01952807,0.00516369,0.00222222,-0.00819666],[0.00804829,-0.02255639,0.01666655,-0.02142857,0.0,0.01369863,-0.00372466,-0.00809249,-0.0234375,-0.03112033,-0.04796162,0.01388889,0.05502844,0.01659751,-0.0239726,-0.03104213,-0.05206611],[-0.00998004,-0.02051282,-0.03278667,-0.06569343,-0.03171269,-0.04222973,-0.01682238,-0.01981352,-0.052,-0.03211991,0.02770752,-0.02328767,0.0,-0.02938776,-0.02631561,-0.06864989,-0.0148213],[-0.00403226,0.0013089,0.02146881,0.028125,0.01965069,0.02292769,0.0057034,0.01070155,-0.03797468,0.01106195,0.00735267,-0.01963534,-0.01079136,-0.06980656,0.00180162,-0.01719902,0.02300882],[-0.03238866,0.00392157,-0.02654867,0.0,0.00428272,-0.01724138,0.00945205,0.00588235,0.04385965,0.00218818,0.02189808,-0.01287554,-0.00363636,-0.05696203,-0.00179838,0.005,-0.00173009],[-0.0041841,-0.00260417,0.0693183,0.03191489,0.00639643,-0.02280702,0.01498108,0.04678363,0.0210084,0.04803493,-0.02380952,0.0115942,0.00364963,0.02588686,-0.00360397,0.02238806,-0.03466206],[0.01260504,0.01174935,0.04144516,0.00883652,-0.00211843,0.01615799,-0.01107008,0.03798883,0.06995885,0.00833333,0.01219485,0.0286533,0.02727272,-0.00934579,0.01265841,0.00243309,-0.00179532],[-0.01452282,0.01548387,0.06938776,-0.00437956,0.00636927,-0.01766784,-0.00932819,0.00861141,-0.01153846,0.03305785,0.04578341,-0.02506964,-0.01415929,-0.06981132,-0.01428571,0.03640777,0.02967632],[-0.00210526,0.00889454,0.06870229,0.06891496,0.00843894,-0.00899281,0.00753265,-0.02347919,0.0,0.028,0.00921659,-0.00857143,0.00179533,-0.01318458,-0.00362319,0.03981265,0.01484705],[-0.00421941,-0.00251889,0.0,0.00548697,0.00836832,0.0,0.05794389,0.00327869,-0.0233463,0.01750973,0.02968011,-0.00432277,0.0,-0.06166495,0.00909109,-0.0045045,-0.0215146],[-0.00635593,-0.02525253,-0.04464286,-0.03001364,-0.02320436,0.0,-0.02650169,-0.01742919,-0.01593625,-0.01912046,-0.03547673,0.00868307,0.0,0.06900329,-0.01261279,-0.02262443,-0.03254181],[-0.01918977,-0.03108808,0.0,0.00562588,-0.02807775,-0.03811252,-0.02722315,-0.01995565,-0.01214575,-0.03703704,-0.03908022,-0.0071736,-0.01612903,-0.00102459,-0.02189781,0.03240741,0.00545465],[-0.00217391,-0.00802139,-0.02429907,-0.0027972,0.01777778,0.01132075,-0.0018658,0.010181,0.0,0.01214575,0.0,0.00433526,0.00546448,-0.02564103,-0.00186548,0.00224215,-0.02260409],[0.00217865,0.0,-0.06992347,-0.00420757,-0.00436681,0.0,-0.00747633,0.0,0.00819672,-0.022,-0.04784689,-0.00431655,-0.01268115,0.06631579,-0.00560767,0.01342282,-0.04255317],[0.02826087,0.02156334,0.03810516,0.00422535,0.02631579,0.03731343,0.0112994,0.02911534,0.04065041,0.04294479,0.01256254,0.02023121,0.0238532,0.01678184,0.06390977,0.03752759,0.00193235],[0.00845666,0.00263852,0.00396825,0.04488079,-0.0042735,0.00179856,0.00186191,0.01088139,0.01171875,0.00392157,0.0,0.00424929,0.00358423,0.05825243,-0.00176696,0.03404255,-0.01639332],[0.0,0.01578947,-0.00197628,0.00671141,0.01287554,0.01256732,-0.00185845,-0.00107643,-0.02316602,0.02539062,-0.00496223,0.0,0.0392857,0.0,0.00177009,0.02057613,0.0],[0.00838574,0.00259067,0.02376238,0.00666667,0.01271186,0.0,0.02420862,-0.00862069,0.00790514,0.00571429,0.0498753,0.0112835,0.05670101,0.01559633,0.01766784,0.04637097,0.06960778],[-0.002079,-0.0129199,0.00967118,0.05695364,0.0083682,0.0106383,0.02909054,0.00217391,0.0,-0.01136364,0.04513037,-0.0013947,0.02276422,0.00271003,0.00694444,-0.04046243,-0.00091658],[0.01875,0.0078534,0.00191571,0.00250627,0.00207469,-0.00175439,0.03533585,0.00867679,-0.00784314,0.01149425,-0.01363636,0.00558659,-0.01430842,-0.03603604,-0.00517259,-0.00803213,-0.00183485],[0.0,0.0,0.01338432,0.0175,0.0,-0.00175747,0.00341283,0.00645161,-0.00395257,0.06818182,0.03686636,0.0125,0.01612903,0.00560748,0.00173328,0.01619433,-0.01930147],[0.00408998,-0.00649351,-0.03396226,0.03685504,0.00414079,-0.01584507,-0.0204081,-0.00534188,-0.02380952,0.06914894,0.06888913,-0.00548697,0.0079365,0.00371747,0.00173028,0.03187251,0.004686],[-0.02443992,-0.03660131,-0.04882812,-0.04028436,-0.0371134,-0.03577818,-0.01041663,-0.03329753,-0.05691057,0.00995025,0.06860682,-0.04413793,-0.01732283,-0.06944444,-0.03108843,0.04633205,-0.03731345],[-0.01878914,-0.02578019,-0.05646828,0.00617284,0.0235546,-0.01669759,-0.02807022,-0.02,-0.00431034,0.02955665,0.0680936,-0.03030303,-0.00961538,-0.06965174,-0.02139038,0.01476015,-0.02034884],[-0.01276596,0.01392758,0.00108825,-0.03067485,0.0292887,-0.00566038,0.0,0.00680272,-0.03896104,-0.06858054,0.06921634,-0.0327381,0.00323624,0.0,-0.01092859,-0.06909091,-0.00593467],[0.01508621,-0.00549451,0.0,-0.02151899,-0.00406504,-0.01518027,-0.01624544,-0.04054054,0.0045045,-0.00684932,-0.02214632,-0.00923077,-0.03225805,0.01604278,-0.00552505,0.00390625,0.00099502],[-0.01061571,-0.01519337,-0.02717402,0.00905563,-0.04693878,-0.00192678,0.0,-0.02934272,0.00896861,-0.02931034,0.06968641,-0.02329193,-0.06999997,0.0,-0.01296315,-0.05252918,-0.02982116],[-0.06866953,-0.0687237,-0.06927352,-0.06923077,-0.06852248,-0.06949807,-0.06972482,-0.06892382,-0.06666667,-0.06927176,-0.06840391,-0.06995231,-0.06989244,-0.06947368,-0.06941821,-0.0698152,-0.0696721],[0.06682028,0.05572289,0.01560612,-0.01515152,0.01149425,0.04356846,0.06903361,0.05194805,0.01428571,-0.01717557,-0.06993007,0.03589744,0.01734103,0.0158371,0.02822581,-0.03532009,0.00770937],[0.00215983,0.00142653,0.06974007,0.06993007,0.02954545,0.02385686,0.01107008,0.06790123,0.04225352,0.0368932,0.04323288,0.02640264,0.05303028,0.06792873,0.0372547,0.06864989,0.03060103],[-0.00215517,-0.02279202,-0.02430962,0.00392157,-0.03090508,-0.00194175,-0.02189774,-0.02196532,0.06756757,0.02247191,-0.04504486,-0.03536977,-0.04496401,0.0,-0.02646465,0.03640257,-0.02863198],[0.01295896,-0.00874636,-0.02265006,-0.01171875,-0.01366743,-0.00389105,-0.005597,-0.03073286,0.06751055,-0.01831502,-0.06981111,0.0,-0.0687382,0.02189781,-0.00388389,0.02479339,-0.02729272],[0.0,0.00441176,-0.00115863,-0.02503294,0.00461894,0.0,0.00375219,-0.01707317,0.06719368,-0.02052239,-0.02231259,0.00666667,0.02527805,0.02040816,-0.00584776,0.02016129,-0.00112233],[0.01279318,0.00732064,0.01856148,0.02702703,0.0045977,0.00390625,0.00560746,0.02605459,-0.00740741,-0.02857143,-0.0373444,0.00331126,0.0690335,0.02,0.00784314,-0.00790514,0.00786529],[0.0,0.01744186,-0.00455581,0.04473684,-0.01830664,0.0,-0.00371732,0.0120919,-0.02985075,0.02745098,0.06896552,0.0,-0.02952028,0.0,-0.00389105,0.02788845,0.01337782],[-0.00631579,-0.01,-0.00457666,-0.03652393,-0.04195804,-0.00194553,-0.00373119,-0.01553166,0.06923077,-0.01908397,-0.06048387,-0.00825083,-0.00380228,0.00294118,0.0,-0.00193798,-0.01650153],[-0.02542373,-0.03030303,-0.03448276,0.00915033,-0.00243309,-0.02534113,-0.02996259,-0.03276699,-0.0323741,0.03696498,-0.06652384,-0.00665557,-0.06774806,-0.02248289,-0.02148457,-0.01941748,-0.00671154],[-0.02173913,-0.0327381,-0.03333333,-0.06735751,-0.06829268,-0.028,-0.01544425,-0.06900878,-0.0669145,-0.04878049,-0.02298801,-0.0318258,0.0399181,-0.02,-0.04191597,-0.06930693,-0.06981983],[0.02666667,0.03230769,0.04187192,0.02638889,0.03403141,0.0,0.017647,0.02425876,0.05577689,0.0295858,-0.0023532,0.03287197,-0.00393701,0.01020408,0.05208312,0.0,0.02421309],[0.03030303,0.01490313,0.03073286,0.04465494,0.06835443,0.02469136,0.0154145,0.04210526,0.04150943,0.06896552,0.02358491,0.0318258,0.04743081,0.05252525,0.04158437,0.01914894,0.05082742],[-0.00840336,-0.00734214,0.03211009,0.00777202,0.03080569,-0.01405622,-0.01707774,-0.00883838,0.02898551,0.01433692,0.03225806,-0.0211039,-0.01320754,-0.02975048,-0.00380228,-0.01461378,0.0697413],[0.00847458,0.0295858,0.01111111,0.00899743,0.02298851,0.0305499,0.02316595,0.03184713,0.00704225,0.02826855,-0.00446429,0.01658375,0.00573614,0.01879327,0.00954179,0.00635593,0.04311252],[-0.00210084,-0.02155172,0.00659341,0.0,0.00224719,-0.00395257,0.01509415,-0.00246914,-0.03146853,0.00171821,-0.02017913,-0.00489396,-0.00380228,0.0,-0.01323232,-0.01894737,-0.01713713],[-0.00842105,0.01615272,0.0,0.01273885,0.01793722,0.00992063,0.0,0.01237624,0.02166065,-0.02915952,-0.00228858,0.00655738,-0.02290075,0.0,0.02298851,0.01716738,-0.01128197],[0.01061571,0.00433526,0.00436681,-0.02641509,0.03524229,0.00589391,0.00929393,0.00733496,0.0,-0.02826855,-0.00229383,0.00325733,0.01367187,0.06990291,0.00374532,0.02320675,0.03112026],[-0.00840336,-0.01294964,-0.00108707,-0.04392765,0.00425532,0.0,0.0073666,-0.00728155,-0.01766784,0.01090909,-0.0091954,-0.01461039,-0.01734103,0.06987296,-0.02052258,0.00206186,-0.01106631],[-0.00423729,-0.01457726,-0.0446136,-0.04459459,0.02330508,0.0,-0.02559434,-0.03056235,0.02877698,-0.03956835,-0.01856149,-0.01976936,-0.01568627,0.01102629,-0.01714267,-0.02057613,-0.04781278],[-0.0106383,-0.00295858,-0.00455581,0.00707214,-0.00621118,0.0,0.00750481,-0.01261034,0.01748252,-0.03558052,-0.01891253,-0.02352941,-0.02390437,-0.01845638,-0.00775194,-0.0105042,0.00641021],[-0.00215054,0.0,-0.01716259,0.00983146,0.01041667,-0.01953125,-0.00186233,-0.00383142,0.0137457,0.00194175,0.00722918,-0.01204819,-0.01031344,-0.01709402,0.01757793,0.04458599,0.04194444],[0.0387931,0.05341246,0.06519209,0.03616134,0.04742268,0.0498008,0.04477598,0.05,0.06779661,0.05813953,0.05263158,0.06968641,0.06875,0.06956522,0.05950117,0.03252033,0.03601108],[-0.01037344,-0.01408451,0.00983618,-0.01208054,-0.00787402,-0.0113852,0.00892881,-0.01465201,0.06031746,-0.01648352,-0.01363636,0.00651466,0.00779727,-0.00813008,-0.01811594,-0.01968504,-0.01737968],[0.0,0.0,-0.01190465,-0.01358696,0.00396825,0.00383877,-0.00884979,0.00991326,0.00598802,0.01862197,0.03686636,0.04368932,-0.00193424,-0.00737705,0.00738007,0.00401606,-0.00680272],[-0.00419287,-0.00571429,-0.0010954,0.00964187,0.02371542,-0.00956023,-0.00714257,-0.00245399,0.02380952,0.0,-0.00222198,-0.01085271,-0.00193798,0.01486375,-0.01465201,0.004,-0.01780822],[0.01052632,0.00287356,0.0,0.01500682,0.0019305,0.00772201,0.02697833,0.00369004,-0.00581395,0.00365631,-0.02672605,0.00470219,0.01941748,0.04882018,0.01672881,-0.01195219,0.0069735],[-0.00833333,0.00429799,-0.02083322,-0.00134409,0.03468208,0.00957854,-0.01751321,-0.01960784,0.02339181,-0.00182149,-0.02288379,-0.00624025,-0.00952381,0.06283941,0.0,-0.02016129,-0.00554017],[-0.00630252,-0.0128388,0.01231791,-0.00942127,0.0,-0.00948767,-0.00356492,0.01625,-0.02857143,-0.01459854,-0.00468333,0.00156986,-0.01923077,0.04452555,0.00914058,-0.02057613,-0.02089136],[0.00422833,0.00722543,0.01659281,0.01358696,0.00558659,0.00383142,0.00178864,0.06888069,0.00294118,-0.01296296,0.02352889,0.01097179,0.01176471,-0.05171209,0.02355054,-0.01470588,0.00995733],[0.00842105,0.0071736,0.00108825,-0.00536193,0.03518519,0.02671756,0.01607138,0.00460299,0.0058651,-0.00187617,-0.0091954,0.01085271,-0.00193798,0.06927045,-0.00707965,0.0,-0.0028169],[-0.00835073,-0.00712251,-0.01086957,-0.00269542,-0.02325581,-0.00743494,0.00351519,-0.01947308,0.03206997,-0.01315789,0.0255223,0.00306748,-0.00970874,0.00482426,-0.01782495,0.0,-0.01553672],[-0.00631579,0.00143472,0.0021978,-0.00675676,-0.0018315,-0.00561798,-0.01225929,0.00934579,0.05932203,-0.01333333,0.00678758,0.00917431,-0.00392157,0.0308642,0.0,-0.01705757,-0.0286944],[-0.00423729,0.01719198,-0.02192982,0.00952381,-0.01651376,0.00188324,-0.01418422,-0.02199074,0.024,-0.06949807,0.06966266,0.00909091,-0.00787402,-0.00864937,-0.00544483,-0.04121475,0.01181684],[-0.00425532,-0.01408451,-0.00224215,0.01078167,-0.02238806,0.0112782,0.00359698,-0.01183432,0.01302083,-0.06846473,-0.02731116,0.02852853,-0.00198413,-0.05234899,-0.00547464,0.00452489,0.01313869],[0.0042735,-0.00571429,-0.03370787,0.0,0.02099237,-0.01115242,-0.00537633,0.0251497,0.05398458,-0.06904232,-0.06911449,0.01021898,0.01590457,0.0694051,-0.00917413,-0.02477477,-0.00864553],[0.0,0.00431034,0.01046524,0.004,0.0,0.0,0.0,-0.01869159,0.0,-0.0645933,0.02088193,-0.0216763,-0.00978474,-0.03311258,-0.01851852,-0.01385681,-0.01162791],[-0.01702128,0.01144492,0.00115063,-0.00265604,-0.01495327,-0.0037594,-0.00540539,0.01071429,-0.06829268,0.01278772,0.01136389,-0.00886263,-0.0167983,-0.02739726,0.01698132,0.0117096,0.0],[-0.02164502,-0.00141443,0.0,0.03328895,0.00948767,-0.00377358,-0.01086953,-0.00117786,-0.06806283,-0.03282828,0.06741522,-0.00745156,0.00301495,0.06478873,0.03896084,-0.00694444,-0.03088235],[0.02212389,0.00708215,0.0,0.01030928,0.06954887,0.00757576,0.01098897,0.01415094,-0.03651685,0.03394256,-0.01052609,0.01801802,0.0260521,-0.00132275,0.0,0.02097902,0.00758725],[-0.00865801,0.00703235,0.01609195,0.01403061,-0.00878735,0.03383459,0.00543476,0.0,-0.03498542,-0.03787879,-0.0489364,-0.00589971,0.00585938,0.06953642,0.00535732,0.00684932,-0.00301205],[-0.00218341,0.01117318,-0.02036199,0.01509434,-0.00886525,-0.00545455,0.00360346,-0.01627907,0.03927492,-0.04986877,-0.01118544,0.00445104,-0.01165049,0.01547988,-0.00710479,0.00226757,-0.00302115],[-0.00437637,-0.01657459,-0.04157044,-0.01239157,-0.01431127,-0.01645338,-0.01275002,-0.01300236,-0.02325581,0.03038674,0.02714932,-0.0014771,-0.01178782,-0.01829268,-0.00536691,0.02262443,-0.04242424],[-0.0021978,-0.00983146,0.01807241,0.0238394,0.00544465,0.01672862,-0.0037037,0.00359281,-0.0297619,-0.02949062,-0.00440529,0.0,0.00198807,-0.00496894,0.00179838,-0.02433628,0.01582278],[-0.00881057,0.00851064,0.00366848,0.0,0.02888087,0.01279707,0.00743494,-0.00119332,0.02453988,0.00276243,0.04424779,-0.00591716,-0.00892845,-0.04806492,-0.0035903,-0.00226757,0.0482866],[0.01333333,0.01125176,0.02415459,-0.00367647,-0.00877193,0.00361011,-0.00184482,0.00597372,-0.00299401,-0.00550964,-0.0063557,0.01190476,0.0210209,0.0295082,0.03243206,-0.01363636,-0.0089153],[0.02192982,-0.00417246,0.0,-0.01722017,0.01769912,-0.00899281,-0.01848469,-0.02612827,0.03903904,-0.01108033,0.02558635,0.00147059,0.00392157,0.00636943,-0.02126641,-0.00921659,-0.02398801],[-0.01287554,0.01396648,-0.00943396,-0.00250313,0.02956522,-0.00362976,-0.00376606,-0.03658537,-0.00867052,-0.01120448,0.05197481,-0.00146843,-0.01367188,-0.02531646,-0.00362976,-0.00232558,0.04761905],[-0.00869565,-0.0137741,-0.00238095,-0.01003764,0.01351351,-0.0273224,-0.00756144,-0.01012658,-0.02623907,0.06798867,-0.06917018,-0.02100926,0.00594059,0.01948052,-0.02550091,-0.00699301,0.05131965],[-0.00657895,-0.01675978,-0.02505967,-0.01267427,-0.01333333,-0.03370787,-0.00190497,-0.01278772,-0.04790419,0.00795756,0.00849257,-0.00460123,-0.01181102,0.01847134,-0.00186916,-0.03051643,-0.0167364],[0.00662252,-0.00710227,0.02080783,-0.01589391,-0.02364865,0.00193798,0.01335857,0.02979275,-0.03773585,0.06842105,-0.0273682,-0.00616333,0.0,-0.00062539,0.01123596,-0.00242131,-0.02269504],[0.00219298,-0.00429185,-0.01079137,-0.01208054,-0.01384083,0.0,-0.00753296,-0.00125786,0.0130719,0.01477833,0.00216426,-0.00155039,0.01593625,-0.03754693,-0.00740741,-0.00485437,-0.0275762],[0.03063457,0.0,-0.00606061,0.01358696,-0.0122807,0.0212766,0.00606226,-0.00881612,0.0,-0.05097087,-0.0496758,0.01086957,0.02121732,0.03185956,0.00746269,-0.00487805,-0.00298507],[0.05307856,0.01293103,0.01097561,0.01206434,-0.01243339,0.00378788,0.00622407,-0.0025413,0.00322581,0.01790281,0.01363636,0.01075269,-0.00115207,-0.03087587,0.02222222,0.00980392,-0.00449102],[0.01612903,0.00283688,0.00603136,-0.00794702,-0.01079137,0.00754717,-0.00412371,0.01910828,-0.0096463,-0.01507538,-0.00896861,0.02279635,-0.00807382,-0.04161248,0.01630435,0.0,0.00451128],[-0.0218254,-0.01414427,-0.00239808,-0.03204272,0.00181818,-0.03183521,-0.00621118,-0.02875,-0.02272727,-0.02806122,-0.00904977,-0.03120357,-0.02790698,0.06987788,-0.02673797,-0.01941748,-0.0239521],[0.01014199,-0.00143472,-0.01802885,-0.00275862,-0.00362976,0.00193424,0.0,-0.01801802,0.00332226,0.01574803,0.01369863,0.00460123,0.00478469,-0.01077996,-0.00732601,-0.00990099,-0.00306748],[0.0,-0.00718391,-0.02080783,0.01383126,-0.01092896,-0.00579151,0.00208333,0.03669725,0.00993377,-0.01808786,-0.0045045,-0.01221374,-0.01190476,-0.02564103,-0.00553506,-0.0075,0.00461538],[0.00803213,-0.02026049,-0.015,0.0,-0.01841621,-0.03300971,-0.01455301,-0.01517067,-0.06885246,0.0,-0.02488713,-0.01391036,-0.02891566,-0.00789474,-0.01855288,-0.0302267,0.00612557],[0.03585657,0.00295421,0.02664975,0.0,0.02439024,0.01204819,0.01898734,0.00770218,-0.04225352,0.0,0.01160119,-0.01097179,0.0,-0.01591512,0.0,0.02077922,0.00152207],[0.00961538,0.00441826,-0.00865266,0.03819918,0.0018315,0.00992063,-0.00828157,-0.00127389,0.01838235,-0.02105263,0.02064245,-0.00316957,0.0,0.01078167,0.00189036,0.02290076,0.00607903],[-0.00380952,-0.0058651,-0.00498753,0.00131406,-0.01279707,0.00196464,-0.00835073,-0.00510204,-0.02166065,0.00268817,-0.01124609,0.00794913,-0.01240695,0.01333333,-0.00188679,-0.02985075,-0.01057402],[-0.03441683,-0.01917404,-0.01002506,-0.00262467,0.01296296,-0.01568627,-0.01894737,-0.02051282,0.02214022,0.02144772,0.0,-0.02681388,-0.0201005,-0.03486842,-0.03213611,-0.05128205,-0.02290076],[0.04950495,0.00451128,-0.01392405,0.0,0.00365631,0.0,0.01072961,0.01308901,-0.0433213,0.00524934,0.0,0.00162075,-0.01282051,-0.00477164,0.01171875,0.0,-0.0015625],[0.0,0.00299401,0.01026958,-0.00526316,0.01275046,0.00796813,0.00212314,0.01033592,0.07098088,0.03133159,-0.005,0.00161812,-0.0025974,0.00547945,0.00579151,0.0,0.00156495],[0.0,-0.00447761,-0.00508259,0.0,-0.01258993,-0.00790514,-0.01271186,-0.01662404,-0.01515152,0.01012658,-0.00251256,-0.00323102,0.0,-0.01566757,-0.00191939,-0.0027027,0.0],[0.0,0.00149925,-0.0063857,0.00529101,-0.01639344,0.00398406,-0.00429185,-0.00650195,0.0,-0.02005013,-0.01007557,0.01296596,-0.0078125,-0.04013841,0.0,0.00271003,-0.0015625],[-0.00360891,0.00898204,0.03341902,0.04736842,0.01666667,0.0,0.04956897,0.03926702,0.01923077,0.01790281,-0.01272265,0.0144,0.06955381,-0.01874549,0.00961538,0.02432432,0.02347418],[-0.01978022,0.0,0.02736318,0.0,0.01457195,0.00198413,-0.00616016,0.0,0.01886792,-0.01005025,-0.00515464,0.00157729,0.06748466,0.00293902,0.00380952,0.0,0.0],[-0.01345291,0.01780415,0.01694915,-0.01005025,-0.01256732,0.0,-0.00826446,-0.00377834,-0.01111111,0.01015228,0.02331606,-0.00944882,-0.01149425,-0.01098901,0.0056926,0.06860158,0.00152905],[0.01818182,-0.01020408,-0.02380952,-0.01522843,0.03454545,-0.0039604,-0.01458333,-0.00505689,-0.00374532,0.0678392,0.01012658,-0.00794913,-0.02209302,0.06962963,-0.00377358,-0.01728395,0.0],[-0.00892857,-0.00589102,-0.01829268,-0.00773196,-0.00702988,0.0,-0.00211416,-0.00889454,-0.03007519,0.0,0.01754386,-0.00801282,0.02140309,0.00623269,-0.01893939,-0.03517588,-0.00763359],[-0.00900901,0.00296296,0.00869565,-0.01818182,0.00353982,0.00397614,0.0,-0.01025641,0.00387597,0.05882353,0.00985222,-0.00161551,0.00465658,0.06951136,0.003861,0.0,-0.01076923],[0.01590909,0.00443131,-0.03694581,0.01058201,-0.02821869,0.01584158,-0.01271186,-0.01554404,-0.05019305,-0.02666667,-0.02682927,0.03721683,0.00579374,0.003861,0.02115385,-0.02083333,-0.00622084],[0.00671141,-0.00294118,0.00383632,-0.01832461,-0.0199637,0.00194932,0.00858369,0.02368421,0.05284553,-0.00684932,0.00501253,0.01404056,0.02073733,0.02307692,0.0,-0.00531915,-0.01251956],[-0.00444444,-0.01179941,0.01273885,-0.02666667,-0.00185185,-0.00389105,-0.00425532,-0.00771208,-0.02316602,0.01149425,-0.01246883,0.02769231,0.01580135,-0.01942356,0.00564972,-0.01069519,0.00158479],[0.00892857,0.00298507,-0.0163522,0.0,-0.00185529,-0.0078125,0.0042735,0.01683938,-0.00790514,-0.02272727,-0.01262626,0.0,0.0,0.03514377,0.00187266,0.0,-0.00949367],[0.01327434,0.00892857,0.02941176,0.00821918,0.00185874,0.01574803,0.00638298,0.00636943,0.0,0.03255814,0.02046036,0.01197605,-0.01333333,-0.03657552,0.01121495,0.01351351,0.00638978],[-0.01091703,0.00147493,-0.00124224,0.0,0.00927644,0.00193798,-0.01479915,-0.01139241,-0.01195219,0.04054054,-0.00501253,-0.00887574,0.0,0.00998004,-0.00184843,0.01333333,0.00634921],[0.0,0.01325479,-0.00248756,0.00951087,0.03308824,0.02901354,0.00643777,0.02432778,0.01209677,-0.02597403,0.01763224,0.0238806,0.01013514,-0.02042161,0.02592593,-0.00526316,0.03312303],[0.0,-0.00436047,0.00249377,0.01345895,0.03202847,0.0,-0.0021322,-0.00375,-0.00796813,-0.00444444,0.00247525,-0.01311953,0.00334448,0.01143241,0.0,-0.00529101,-0.00763359],[0.0,-0.00291971,0.00124378,0.01460823,-0.01551724,0.01315789,-0.00641026,-0.01003764,-0.01204819,-0.01785714,-0.02222222,-0.00738552,0.0,0.00797872,0.00361011,-0.00797872,-0.01692308],[-0.01986755,0.0,-0.0310559,0.0104712,-0.0262697,0.00927644,-0.00645161,-0.01140684,0.00406504,-0.06590909,-0.03787879,0.00446429,-0.03333333,0.01649077,-0.01258993,-0.05898123,-0.01095462],[0.01801802,0.00292826,0.01025641,-0.01554404,0.02877698,0.01838235,0.0,-0.00641026,0.01619433,0.05109489,-0.00262467,0.00296296,0.02873563,-0.02595717,0.00546448,0.0,-0.00316456],[0.00442478,0.00729927,0.00126904,0.01842105,-0.01398601,-0.00541516,0.004329,0.01677419,0.00796813,0.02546296,0.02368421,-0.00295421,-0.01005587,-0.00066622,0.00543478,-0.00854701,0.01269841],[0.00440529,-0.01304348,-0.01520913,-0.01679587,-0.0035461,-0.00907441,0.0,-0.00380711,-0.01581028,-0.01128668,0.0,-0.01777778,-0.01467269,-0.00866667,-0.01801802,-0.03735632,-0.00940439],[-0.01096491,-0.010279,-0.00900901,-0.01051248,-0.01067616,-0.01098901,-0.01077586,-0.02420382,-0.00803213,-0.02968037,-0.02827763,-0.02262443,-0.03321879,-0.01143241,-0.02018349,-0.02686567,0.0],[-0.00443459,-0.03264095,0.0012987,0.0,-0.00719424,-0.01111111,-0.02396514,-0.0078329,-0.01619433,0.0,0.0026455,-0.00154321,-0.01066351,-0.02721088,-0.01123596,-0.04601227,-0.02848101],[0.01781737,0.0,0.01167315,0.02921647,-0.01811594,0.00374532,0.00446429,0.01052632,0.00411523,0.00470588,0.01319261,-0.00463679,0.00479042,-0.01538462,0.00378788,0.02250804,0.0034607],[0.01094092,-0.01380368,-0.03076923,-0.00645161,-0.00369004,-0.01679104,-0.00444444,-0.0078125,-0.02868852,0.0117096,-0.02604167,-0.02173913,0.02026222,-0.03409091,-0.02641509,-0.05660377,-0.01142857],[0.02813853,0.00466563,0.00529101,0.02597403,0.0696152,0.03036053,-0.00892857,0.00656168,0.06751055,0.03009259,-0.00802139,0.01269841,0.01635514,0.05,0.00775194,0.01,-0.00963391],[-0.00842105,-0.00928793,-0.01578947,-0.01898734,0.02008032,0.00368324,-0.01576577,0.0,0.0,-0.02022472,-0.02425876,-0.01410658,-0.0091954,-0.01610644,-0.00576923,-0.02970297,-0.02723735],[-0.02972399,-0.0375,-0.06016043,-0.01935484,0.01377953,-0.0146789,-0.05720824,-0.01955671,-0.01581028,-0.05733945,-0.06077348,-0.04769475,-0.03016241,-0.02562278,-0.03288201,-0.06462585,-0.014],[0.0,0.00324675,0.0113798,0.0,0.0,0.00372439,0.00970874,0.00930851,0.01204819,0.0,-0.04117647,-0.00500835,-0.00956938,-0.0036523,0.014,0.00363636,-0.02231237],[-0.01969365,-0.03883495,-0.0323488,-0.05263158,-0.01747573,-0.04267161,-0.00480769,-0.06982872,0.0,0.0,0.03067485,-0.02684564,-0.0205314,-0.06964809,-0.01380671,0.0,-0.00207469],[0.00446429,-0.00678871,0.01017442,0.0,0.0256917,0.00581395,0.00483092,0.01274788,0.00793651,0.02189781,0.00892857,0.00862069,0.0135635,0.04018913,0.0,0.0326087,0.00831601],[0.0,-0.00172117,-0.03597122,0.01666667,-0.01348748,-0.00385356,0.0,-0.04895105,0.01968504,0.0047619,-0.00589971,-0.02222222,-0.04622871,-0.01515152,-0.002,-0.05614035,-0.0185567],[-0.00888889,-0.00862069,-0.01044776,-0.01229508,-0.0234375,-0.0212766,-0.02163462,-0.06911765,-0.01930502,0.02606635,-0.03264095,-0.01223776,-0.04336735,0.00769231,-0.01603206,-0.05576208,-0.04411765],[0.00896861,0.00869565,0.02413273,0.00829876,0.012,-0.00790514,0.03194103,0.0300158,0.01968504,-0.01154734,0.02147239,0.00884956,0.016,0.00687023,0.00203666,0.02362205,-0.01538462],[-0.00888889,0.01206897,0.04123711,0.01234568,-0.00197628,0.01593625,0.03095238,0.03578618,-0.00772201,0.0046729,0.02102102,-0.00350877,0.0144357,0.06141016,-0.0101626,-0.01538462,0.0078125],[0.00224215,0.03747871,0.03253182,0.03523035,0.01782178,0.00784314,0.00692841,0.04962406,0.01167315,0.00697674,0.06764706,0.03169014,0.05045278,0.05642857,0.02669405,0.06640625,0.04097453],[-0.02013423,0.01149425,0.00273973,0.0078534,-0.02723735,-0.01945525,-0.00458716,0.00143266,0.0,-0.01154734,0.00826446,-0.01194539,0.00985222,0.00135227,-0.008,0.01098901,0.0212766],[0.02968037,0.03246753,0.01229508,0.0012987,0.006,0.03174603,0.03917051,0.03719599,0.01153846,0.0046729,0.01639344,0.03454231,-0.00243902,-0.00067522,0.02822581,0.02898551,0.021875],[-0.00443459,0.00157233,0.06882591,-0.0077821,-0.00198807,0.02692308,-0.01773836,-0.00551724,0.01901141,0.0,0.00537634,-0.01001669,-0.00611247,0.03310811,0.00588235,0.04577465,-0.00509684],[0.0,0.0,-0.01136364,-0.00392157,0.01792829,-0.00561798,-0.00677201,0.00138696,0.03731343,-0.02325581,-0.02139037,0.0,-0.02583026,0.00065402,-0.00584795,-0.01683502,0.05532787],[-0.01336303,-0.01569859,0.02171137,0.01181102,-0.00391389,0.0,-0.00681818,-0.01385042,-0.01438849,-0.02380952,-0.02459016,-0.01517707,-0.00505051,0.00784314,-0.01372549,0.02054795,-0.03106796],[0.01128668,0.03668262,-0.015,0.00129702,-0.00392927,0.0,0.00686499,-0.00280899,0.01459854,0.00731707,0.0280112,0.01712329,-0.00253807,-0.05317769,-0.00596421,-0.01677852,0.03206413],[0.01116071,0.00923077,0.02284264,0.01295337,0.02366864,0.01506591,0.00454545,0.02816901,0.0,0.0,0.05722071,0.05555556,0.0178117,-0.01917808,0.034,0.03071672,0.0368932],[0.0,-0.0152439,0.02109181,-0.01023018,0.02119461,-0.00185529,-0.00226244,0.00273973,-0.02517986,-0.00484262,0.01546392,-0.01116427,0.02,0.00698324,-0.01353965,-0.01986755,0.02059925],[0.00441501,-0.00309598,-0.0036452,-0.00258398,-0.01320755,0.01115242,0.00226757,0.01092896,0.0,0.00973236,0.02030457,0.01612903,-0.00735294,0.02357836,0.00784314,0.00337838,0.00917431],[-0.02417582,-0.0015528,0.05243902,0.01683938,-0.01720841,-0.01838235,-0.01809955,-0.00540541,-0.01107011,-0.00240964,-0.00497512,0.00634921,-0.01234568,-0.02710027,-0.01361868,-0.03367003,-0.01636364],[-0.00225225,-0.02177294,-0.03592121,0.00254777,-0.01945525,-0.0093633,-0.02073733,-0.01630435,-0.01119403,-0.00966184,-0.0025,0.00946372,-0.02125,-0.05013928,-0.00986193,0.0174216,-0.01109057],[-0.01354402,0.00158983,-0.00721154,0.00127065,0.00396825,0.01512287,-0.00235294,0.01519337,-0.00377358,-0.00487805,0.01754386,-0.00625,0.00127714,0.0,-0.01394422,-0.00684932,0.02429907],[-0.00915332,0.0015873,0.00484262,0.00888325,-0.00790514,0.00372439,-0.00943396,-0.00952381,0.0,0.0,0.00492611,-0.02987421,0.01530612,0.01466276,0.00606061,0.00344828,0.02189781],[0.00692841,-0.01743265,0.02891566,-0.01132075,-0.00996016,-0.00927644,0.00952381,-0.00824176,-0.01515152,-0.00245098,0.0,0.00486224,-0.00879397,-0.00144509,-0.00200803,0.0,0.01428571],[0.00688073,0.01290323,0.0,-0.02035623,0.01006036,0.00561798,-0.00235849,0.00692521,0.0,-0.01228501,-0.00245098,0.0,0.00126743,0.00578871,0.00201207,-0.01718213,-0.02816901],[0.03644647,0.02388535,0.00702576,0.00519481,0.04780876,0.01675978,0.02600473,0.03163686,0.02692308,0.02487562,0.004914,0.02096774,0.03797468,0.03165468,0.03212851,0.06993007,-0.01086957],[-0.01098901,-0.01088647,-0.00465116,0.00129199,-0.00190114,0.003663,0.02534562,0.00133333,0.01498127,-0.00485437,0.00977995,-0.00631912,-0.00487805,0.0237099,0.02529183,0.00326797,-0.00732601],[-0.01333333,-0.00943396,-0.01168224,0.01548387,0.0,-0.01459854,-0.02022472,-0.0159787,-0.01845018,-0.00243902,-0.02179177,-0.00476948,-0.0122549,0.0027248,0.00189753,-0.02605863,-0.01107011],[0.00225225,0.01111111,-0.00118203,0.00762389,0.00952381,0.02777778,0.01146789,0.02165088,-0.0037594,-0.00488998,0.00247525,0.0686901,0.03598015,0.0,0.01325758,0.0,0.00932836],[0.01573034,0.00156986,0.02011834,0.00630517,0.0,0.0018018,0.00680272,0.00529801,-0.00754717,0.03439803,-0.00246914,0.01943199,-0.02275449,0.00271739,0.02429907,-0.00334448,-0.00924214],[0.00221239,0.0015674,-0.02088167,-0.0037594,-0.01698113,0.0,-0.0045045,-0.01185771,-0.00760456,-0.01662708,0.0,-0.02052786,0.0,-0.01084011,0.01459854,-0.01342282,-0.00186567],[-0.01986755,-0.01408451,-0.03080569,-0.02389937,0.0,-0.02158273,-0.02262443,-0.024,0.00766284,-0.02173913,0.01237624,-0.03892216,-0.03431373,0.00547945,-0.03057554,-0.02040816,-0.02429907],[0.0,-0.0031746,-0.0207824,-0.00257732,0.0134357,0.0,0.00462963,-0.00136612,-0.00760456,-0.00740741,-0.01222494,0.01557632,0.02538071,0.02452316,0.03153989,-0.03472222,-0.01724138],[0.00225225,-0.01910828,0.04369538,-0.00775194,0.0,0.00551471,-0.00691244,-0.01504788,-0.00383142,-0.00248756,-0.01237624,-0.02147239,-0.01732673,-0.00930851,-0.01798561,-0.02158273,0.01364522],[0.00224719,-0.00162338,0.00358852,-0.0234375,0.00378788,0.0,0.01392111,0.00416667,-0.00769231,0.01995012,0.06766917,0.0015674,0.00755668,-0.01208054,0.003663,0.01102941,-0.00961538],[0.00672646,-0.00162602,-0.00238379,0.008,-0.00566038,0.00548446,0.00915332,-0.00968188,0.00775194,0.01222494,-0.01408451,0.01408451,0.0,-0.02038043,0.0,-0.01818182,-0.02135922],[-0.00222717,-0.00488599,0.0692951,-0.00529101,-0.00189753,-0.00181818,-0.00907029,0.01815642,-0.01153846,-0.01207729,0.03571429,0.0,-0.01,0.01386963,0.00364964,0.0037037,0.00793651],[-0.015625,-0.01963993,-0.00782123,-0.00797872,-0.03041825,-0.02367942,-0.02517162,-0.02194787,-0.05058366,-0.00244499,0.01609195,-0.02469136,-0.03787879,-0.01504788,-0.02,-0.04059041,-0.02559055]],"target":[[0.097875273,0.075278244,0.004829098,0.010665856,0.044369012,0.101507977,0.058975617,0.084001869,0.019573688,0.018932106,0.001930167,0.127229563,0.059987218,0.165125172,0.124052566,0.003384319,0.002282255],[0.096144121,0.076636477,0.004803655,0.010499386,0.04323652,0.100057003,0.058219787,0.083891868,0.018452337,0.018622307,0.001946893,0.128733953,0.060689666,0.166465683,0.126007709,0.003359582,0.002233051],[0.096473756,0.076946875,0.004833132,0.010724551,0.043239453,0.097920837,0.058766765,0.083866665,0.017700916,0.018544513,0.002045405,0.127166512,0.060889547,0.170271267,0.124812459,0.003448383,0.002348964],[0.097012588,0.079097566,0.004694799,0.010836389,0.043217168,0.097849575,0.058667123,0.082751407,0.018629461,0.018479553,0.002081977,0.126986691,0.06240179,0.165483293,0.126020811,0.003476189,0.00231362],[0.097569758,0.083519551,0.004828829,0.010748718,0.042850279,0.095336191,0.058670437,0.082061313,0.017557258,0.01808332,0.002052933,0.130021994,0.062085208,0.166348679,0.122411435,0.00335911,0.002494987],[0.098897362,0.085227574,0.00490032,0.010698983,0.044807721,0.094033694,0.06031121,0.081432651,0.017661471,0.018350857,0.001951561,0.131554963,0.063851817,0.152583035,0.127700111,0.00342378,0.002612891],[0.096413079,0.084503675,0.004856862,0.010642361,0.047060482,0.094712814,0.059566196,0.08080378,0.017482736,0.018438354,0.002077559,0.12909408,0.063274714,0.156056684,0.128758602,0.00364346,0.002614562],[0.097644541,0.086205853,0.005003817,0.010811964,0.04922894,0.094170753,0.060456952,0.080985782,0.018094013,0.018813249,0.002092301,0.129063376,0.062976901,0.150462023,0.127406876,0.003746159,0.002836501],[0.099534632,0.084477326,0.004944206,0.010955507,0.049549065,0.101559888,0.06171894,0.080159475,0.018203351,0.019117853,0.002063129,0.127029321,0.062649534,0.144944248,0.126389987,0.003715227,0.002988309],[0.099125638,0.083856393,0.00529095,0.010950339,0.04914916,0.097573467,0.061242015,0.083050571,0.018448373,0.018698789,0.002059244,0.127474037,0.061922191,0.149003921,0.125688994,0.003656605,0.002809314],[0.098511156,0.083941846,0.005333725,0.010840969,0.048760923,0.097015116,0.060884877,0.083162109,0.018214739,0.018639862,0.002041872,0.127173737,0.062856218,0.149328105,0.126875041,0.003634093,0.002785615],[0.098754033,0.084298994,0.005421714,0.011625181,0.048081361,0.098126326,0.060123003,0.082510596,0.018134112,0.018460123,0.002018484,0.126510076,0.062710329,0.148583161,0.127871537,0.003896399,0.00287457],[0.099565916,0.084193811,0.005322758,0.012086667,0.044805042,0.100073779,0.05942869,0.08228161,0.017977322,0.018154794,0.002050148,0.128040229,0.063590952,0.148930859,0.126902519,0.003784357,0.002810549],[0.099331005,0.082896787,0.005186704,0.011941135,0.044725779,0.100353182,0.059345545,0.082745149,0.018519516,0.018558528,0.002074758,0.128451757,0.063989708,0.148076137,0.127256827,0.003773864,0.002773619],[0.099655104,0.081735919,0.005308254,0.011700518,0.043587949,0.101244955,0.059145844,0.082621937,0.018181721,0.018183285,0.00197783,0.129617546,0.065793475,0.151335017,0.123616512,0.003661492,0.002632642],[0.101376397,0.082568134,0.005315748,0.011186275,0.042506355,0.099638711,0.059425737,0.083848364,0.017628743,0.018026952,0.002079934,0.130083981,0.066262211,0.150232266,0.123676722,0.00348949,0.002653981],[0.101729636,0.084079288,0.005469991,0.0115787,0.043556258,0.102692422,0.06013516,0.085371835,0.017331452,0.017749526,0.002109403,0.128492219,0.065871737,0.142811633,0.124834647,0.003452677,0.002733415],[0.100332551,0.084674016,0.005418861,0.011698062,0.043949921,0.102867617,0.061389271,0.087391455,0.018172612,0.018146677,0.002177816,0.129283221,0.065942978,0.135279833,0.127012583,0.003505711,0.002756815],[0.099371084,0.084484602,0.005780125,0.012009375,0.043814435,0.099976547,0.061934468,0.091253205,0.018103467,0.018033092,0.002115039,0.130073136,0.065560257,0.13540903,0.125868777,0.00356578,0.002647583],[0.098945182,0.084994022,0.005906649,0.011994102,0.042943871,0.099897337,0.060653422,0.09294121,0.019222361,0.01805174,0.002119381,0.131568273,0.066150248,0.133121321,0.12533589,0.003538641,0.00261635],[0.098826901,0.086336366,0.005733404,0.012717428,0.04899615,0.106090122,0.060204787,0.092823279,0.019157706,0.018607911,0.002229281,0.130004601,0.061611291,0.124852045,0.125216181,0.003882913,0.002709634],[0.098715369,0.086983845,0.006173036,0.013578796,0.049742045,0.105238977,0.060566519,0.091320436,0.019290557,0.019264724,0.002247336,0.129016428,0.062137165,0.124060305,0.124884611,0.004033031,0.002746819],[0.09882759,0.086812595,0.006178696,0.013680331,0.050380104,0.105805049,0.064113823,0.091703848,0.018908038,0.01946671,0.002318619,0.12914969,0.062411945,0.116829329,0.126697777,0.004022813,0.002693043],[0.098071385,0.084912791,0.00592436,0.01336173,0.048785706,0.105667066,0.062892611,0.090433697,0.018663828,0.019223387,0.002251866,0.130101216,0.062916897,0.125274292,0.124936642,0.003959057,0.002623469],[0.098610764,0.085166365,0.005941971,0.013669197,0.047559386,0.104198375,0.062175227,0.088892497,0.018769408,0.01878711,0.002201271,0.132419425,0.062089416,0.127401261,0.125276925,0.004158021,0.002683381],[0.097839428,0.085225371,0.005837377,0.013620049,0.047714722,0.104781496,0.06201548,0.090411771,0.019260571,0.018811958,0.002199509,0.132240699,0.061538584,0.127382949,0.124335403,0.004164008,0.002620626],[0.097241896,0.0840548,0.005406047,0.013478129,0.048375302,0.103915173,0.061200289,0.090026072,0.019249198,0.018571535,0.002081204,0.130581242,0.061869534,0.134646582,0.122615966,0.004193575,0.002493457],[0.096201346,0.084177714,0.005429005,0.013124699,0.048356472,0.103708269,0.060015516,0.089625469,0.020007734,0.018544657,0.002043455,0.128175146,0.061697057,0.136742505,0.125509398,0.00421903,0.002422528],[0.096071923,0.082292733,0.005411814,0.013594137,0.047731743,0.102884958,0.059592412,0.089956857,0.019935547,0.018380614,0.002025633,0.12746867,0.061380568,0.142515876,0.124069879,0.004324606,0.002362032],[0.095853155,0.081938649,0.005393065,0.013597097,0.047547943,0.103940721,0.059087796,0.089726044,0.019458774,0.018392394,0.002002579,0.127178408,0.062738512,0.142406499,0.124006449,0.00438512,0.002346796],[0.09550001,0.081885853,0.005472628,0.013516825,0.04687544,0.102696592,0.059773516,0.088169717,0.019341039,0.018758617,0.002076204,0.127073974,0.064537788,0.14262498,0.124686844,0.004531166,0.002478807],[0.094774951,0.080650103,0.005493378,0.014214995,0.046911518,0.103215702,0.061207335,0.087846843,0.019249201,0.018590096,0.002159021,0.126195673,0.065509546,0.14233243,0.124859079,0.004326016,0.002464113],[0.096953309,0.08130997,0.00546715,0.014220849,0.046838983,0.103462896,0.063093451,0.088017392,0.019146512,0.018580786,0.00212513,0.127428153,0.064338883,0.137550219,0.124729562,0.004282303,0.002454453],[0.096001338,0.080585748,0.005472814,0.014312522,0.046134327,0.10226696,0.062571542,0.087505816,0.019621113,0.018484112,0.002179538,0.127754165,0.064393067,0.142312725,0.123718906,0.004304378,0.002380929],[0.096290816,0.080027879,0.005323607,0.014871275,0.046528421,0.100538817,0.061466783,0.087641926,0.019341093,0.018643152,0.002334593,0.126917204,0.065188622,0.144237446,0.123800314,0.004450927,0.002397126],[0.097433915,0.079354991,0.005278878,0.014633858,0.046087649,0.10054998,0.062304625,0.088324543,0.01933952,0.018538477,0.00255798,0.125830808,0.065898232,0.142308919,0.124416307,0.004775161,0.002366158],[0.098553045,0.078957048,0.005074368,0.014996006,0.048396848,0.101921697,0.061762045,0.088184301,0.019674347,0.018877845,0.002782599,0.125782602,0.066957489,0.135272126,0.125511737,0.004935096,0.002360801],[0.098238496,0.07988047,0.005066151,0.014570512,0.05023424,0.102327633,0.06177104,0.088544078,0.019022324,0.018385022,0.002982264,0.122844635,0.067740426,0.136091369,0.125343945,0.004605031,0.002352361],[0.099659582,0.079884118,0.005082707,0.014298055,0.050860859,0.100712667,0.060953682,0.085232075,0.019663612,0.018579534,0.002924621,0.121636281,0.066643893,0.142295249,0.124575236,0.004636342,0.002361488],[0.100173215,0.079867565,0.005022134,0.014630822,0.052492728,0.102120761,0.06173725,0.084028584,0.019396716,0.018720726,0.003172508,0.120696716,0.067125838,0.139116181,0.124920211,0.004454695,0.002323348],[0.100653763,0.079582896,0.005002731,0.014579641,0.052362614,0.102519366,0.061497823,0.083735403,0.019397274,0.018663848,0.003164219,0.121108679,0.066860971,0.138701779,0.125418548,0.004436324,0.002314122],[0.103608354,0.081987604,0.004949078,0.013953121,0.051513549,0.103228675,0.06371232,0.085801568,0.018626884,0.018300596,0.00285981,0.121050202,0.066157026,0.133396768,0.124429617,0.004158739,0.002266087],[0.100999593,0.079919946,0.005113719,0.014482522,0.050981649,0.10280813,0.062588932,0.088503531,0.018365857,0.0186288,0.00289425,0.120856814,0.066967445,0.134767508,0.125544335,0.004311362,0.002265608],[0.102567531,0.079490146,0.005076863,0.014731503,0.051003467,0.104426474,0.061996523,0.088076755,0.019646603,0.019326257,0.002800412,0.118647686,0.066024172,0.135041136,0.124387272,0.004527371,0.002229829],[0.104280587,0.079132342,0.005002745,0.014597653,0.052169108,0.104404489,0.061833511,0.086073141,0.02058346,0.019838383,0.002611851,0.119086077,0.063762461,0.135435432,0.124362028,0.00465198,0.002174749],[0.10436477,0.078746761,0.005024337,0.014183679,0.051830251,0.104488772,0.061860984,0.085067323,0.02150016,0.019866021,0.002544863,0.11997676,0.064651004,0.135265266,0.123734572,0.00472958,0.002164898],[0.104797227,0.078828115,0.005011374,0.014383504,0.050959427,0.104001089,0.061423572,0.08547204,0.020918116,0.019133894,0.002418964,0.119346014,0.067641877,0.135237241,0.123640031,0.004633079,0.002154437],[0.104643467,0.079541808,0.004961434,0.015110828,0.050429125,0.103848497,0.06157761,0.086035459,0.020450535,0.019211792,0.002600218,0.119170907,0.066173353,0.136282425,0.122978241,0.004788862,0.002195442],[0.104711263,0.079724823,0.0049914,0.014649327,0.048498676,0.104372804,0.061691734,0.085602524,0.021752365,0.01956352,0.002458116,0.1190159,0.066174796,0.135970807,0.123840063,0.004809261,0.002172621],[0.10442522,0.07974205,0.004982762,0.015137729,0.051461375,0.104096507,0.06136501,0.085606236,0.020969802,0.019808657,0.002349595,0.120976498,0.065619868,0.132419032,0.124000974,0.004828917,0.002209768],[0.106441101,0.080532816,0.0050423,0.014669742,0.048146654,0.105426964,0.062625364,0.083432019,0.019732892,0.019534015,0.002385279,0.122040449,0.068523528,0.13087342,0.123787812,0.004669848,0.002135798],[0.106562501,0.080669332,0.005160209,0.014763184,0.049215929,0.102805721,0.062558103,0.083939575,0.020159296,0.019790577,0.002333252,0.12291811,0.067473364,0.12793019,0.126997044,0.004578765,0.002144846],[0.106009632,0.079491842,0.005136281,0.015016418,0.049913419,0.101715305,0.061820417,0.084472185,0.020198863,0.020353081,0.002325407,0.122461112,0.067089413,0.129537028,0.127721475,0.004543593,0.002194528],[0.106198249,0.079630811,0.005295829,0.015256031,0.051141277,0.101315394,0.061365655,0.08364064,0.021379015,0.020742841,0.002419916,0.121107708,0.065804752,0.129279267,0.128542414,0.004513556,0.002366643],[0.104722212,0.079725825,0.005274047,0.01514363,0.051806028,0.102094174,0.061806641,0.085004888,0.021280309,0.020880414,0.002370039,0.120384741,0.065535903,0.13018396,0.126889981,0.004468573,0.002428635],[0.105784925,0.078968795,0.005308798,0.015240247,0.051404655,0.102938846,0.063083012,0.084794632,0.020492859,0.020742639,0.002337029,0.121266019,0.064635652,0.129439957,0.126747815,0.004411875,0.002402245],[0.103759307,0.079420523,0.005226207,0.015263321,0.052491657,0.102835372,0.062353685,0.084508557,0.021181944,0.020557003,0.002305837,0.120740686,0.063354526,0.130955871,0.128258813,0.004437876,0.002348817],[0.103381837,0.078991345,0.005187151,0.01467924,0.05371975,0.101982543,0.062135108,0.084124887,0.020569377,0.020185228,0.002272543,0.119425513,0.063485821,0.136058184,0.126923455,0.004485587,0.00239243],[0.102976539,0.078726358,0.005216074,0.014134891,0.054610085,0.102443602,0.062994205,0.084069364,0.019403439,0.020220666,0.002267766,0.118212689,0.063150136,0.139783555,0.124880723,0.004527015,0.002382893],[0.10448927,0.078187657,0.005058304,0.013582195,0.055356278,0.104390838,0.061811185,0.082725579,0.019935745,0.01977423,0.00223847,0.118078252,0.061573909,0.14098379,0.125072935,0.004459359,0.002282005],[0.105075932,0.078030457,0.005008907,0.013714064,0.05552585,0.106105732,0.062338709,0.081254888,0.020542895,0.019328803,0.002201885,0.117194045,0.060662921,0.140146094,0.126142102,0.00442407,0.002302647],[0.105248472,0.077504996,0.004856299,0.01376804,0.057364714,0.104428761,0.06186452,0.079847829,0.021076705,0.019506006,0.002204854,0.116222129,0.060759975,0.139413562,0.128847308,0.004594341,0.002491489],[0.103068618,0.077000884,0.004938436,0.013599111,0.057120134,0.103349556,0.061591452,0.08004026,0.021378098,0.019450451,0.002212418,0.117199808,0.061732822,0.141641367,0.128693999,0.004522024,0.002460563],[0.103199099,0.076775824,0.005062828,0.013518797,0.056148544,0.103374598,0.062594397,0.080066517,0.022444012,0.019780815,0.002195888,0.119350739,0.061641297,0.139104231,0.127848789,0.004460715,0.002432911],[0.102461119,0.076617443,0.004945277,0.013231446,0.055672028,0.103029357,0.061551803,0.0799344,0.022717011,0.019509421,0.002259142,0.123674323,0.060758841,0.13892568,0.127871324,0.004443811,0.002397575],[0.101990328,0.075836207,0.00493839,0.013342016,0.056419497,0.102003183,0.061059509,0.0797145,0.02371687,0.019886237,0.002251252,0.122282742,0.060031603,0.143772987,0.125946893,0.004455907,0.00235188],[0.101346067,0.075550626,0.004885475,0.013413874,0.055578789,0.10107756,0.062332057,0.079151355,0.023136567,0.019789247,0.002170316,0.120809978,0.060169206,0.147962691,0.125919443,0.004360917,0.002345833],[0.099628986,0.075304881,0.004791928,0.01333397,0.056492521,0.101159799,0.060977418,0.077732937,0.02356121,0.019458272,0.002110857,0.119013795,0.058545466,0.156486399,0.12482624,0.004253259,0.002322061],[0.098204061,0.074123501,0.004795973,0.013137009,0.055888148,0.099393366,0.060411349,0.078100726,0.023121225,0.019211675,0.002089623,0.118241002,0.056805302,0.165119381,0.124953145,0.004143244,0.002261271],[0.097532256,0.07433719,0.004789964,0.013290329,0.055324063,0.098674409,0.060379533,0.082014892,0.023841464,0.019058026,0.002134747,0.118220689,0.056577436,0.160984804,0.126486132,0.004074597,0.00227947],[0.097060217,0.073807073,0.004777808,0.013093359,0.056150358,0.099978498,0.060726343,0.08209398,0.022952738,0.018989448,0.002095003,0.117932214,0.055363203,0.164753356,0.123939121,0.004035849,0.002251433],[0.097459921,0.073471756,0.004726589,0.013059498,0.054817662,0.10048293,0.060868519,0.080507524,0.023741967,0.018701744,0.002148707,0.119781379,0.054798831,0.165919508,0.123260479,0.004036291,0.002216696],[0.095998391,0.072698193,0.004664529,0.012869236,0.054118741,0.099045572,0.059676141,0.080017124,0.025403137,0.018536001,0.002146277,0.119824329,0.05398687,0.172759345,0.122183725,0.003936237,0.002136155],[0.094942637,0.074399387,0.004561166,0.012988809,0.053515517,0.098558402,0.058852676,0.078239122,0.026686702,0.018684071,0.002295264,0.120092746,0.053854095,0.17570189,0.120693477,0.003773137,0.0021609],[0.094495904,0.073508752,0.004558702,0.013193535,0.053148009,0.099624921,0.059348337,0.077445095,0.027910089,0.018573293,0.002243578,0.123462997,0.054600542,0.171898781,0.119978503,0.003808884,0.002200078],[0.094272353,0.072041923,0.004294224,0.013049158,0.052429045,0.097862591,0.058438294,0.077395597,0.028788056,0.0180462,0.00206566,0.123900112,0.053593525,0.179900315,0.118091885,0.003673872,0.002157189],[0.09597965,0.072912964,0.004416485,0.013237174,0.053318249,0.099634907,0.059031894,0.07730231,0.028779228,0.018168855,0.002130656,0.12340964,0.053969186,0.173890005,0.118004068,0.003660523,0.002154209],[0.095645582,0.076029045,0.004844004,0.014024876,0.053603509,0.100627665,0.059186643,0.078462228,0.027564616,0.018352112,0.00240966,0.124000824,0.054156296,0.1738615,0.111522616,0.003540791,0.002168031],[0.093113318,0.075095306,0.004808664,0.014413959,0.052907091,0.09975298,0.058221525,0.077798055,0.02521014,0.017980331,0.002558302,0.122469152,0.05310997,0.181678504,0.115295576,0.003497327,0.002089799],[0.09429971,0.074548227,0.004729419,0.014364497,0.055532375,0.099586072,0.058060691,0.077598733,0.024074165,0.018033845,0.002496944,0.12353135,0.053478252,0.179829343,0.114237227,0.003522134,0.002077016],[0.09339636,0.073705647,0.004753743,0.01438263,0.0542583,0.102859817,0.057630095,0.076762583,0.022265154,0.017309984,0.002344852,0.122688394,0.053023399,0.184330301,0.114742448,0.003501605,0.002044686],[0.093314448,0.074018824,0.004677662,0.014548588,0.054465532,0.102432696,0.057555952,0.075848846,0.022870247,0.016874837,0.002310501,0.123395827,0.053076342,0.185004693,0.114076384,0.003497253,0.002031369],[0.093984042,0.073866723,0.004501972,0.01447346,0.054960198,0.101916285,0.056227521,0.075175945,0.022618987,0.017301023,0.002390598,0.124643183,0.053695505,0.183901912,0.114780671,0.003602549,0.001959425],[0.094261337,0.073150896,0.004561582,0.014746633,0.054514222,0.104155847,0.055824436,0.075087994,0.021928947,0.01713003,0.002368524,0.125286291,0.053076692,0.182847565,0.115580397,0.00349783,0.001980775],[0.093409193,0.073778406,0.004498358,0.014833165,0.055711613,0.105464296,0.056520509,0.075477378,0.023227525,0.017138345,0.002487839,0.124516095,0.052249198,0.179950396,0.115138703,0.003510377,0.002088605],[0.092608231,0.073768989,0.004552523,0.014654953,0.054498987,0.103556681,0.05594613,0.075030198,0.023130109,0.017052767,0.002451339,0.123274365,0.052648186,0.185037431,0.116302919,0.003433531,0.002052661],[0.095355494,0.073857004,0.004586238,0.014519474,0.055256107,0.103402251,0.055413073,0.073610917,0.023916369,0.017056579,0.002534462,0.124390161,0.052656944,0.185311651,0.112684102,0.003429493,0.00201968],[0.094841714,0.075338834,0.004576516,0.01455478,0.05717192,0.103808399,0.055456336,0.071441488,0.024037,0.016938925,0.002679381,0.125149635,0.052194616,0.18311898,0.113126708,0.003438444,0.002126323],[0.09586962,0.075308003,0.00461453,0.014516815,0.057788232,0.102961772,0.055501938,0.071475616,0.023329022,0.01722127,0.002512765,0.122360959,0.052363073,0.186069938,0.112414204,0.003440023,0.002252221],[0.096283951,0.074862262,0.00455297,0.014409635,0.057189269,0.100582862,0.055654225,0.071409779,0.022176105,0.017076711,0.002547685,0.123134432,0.051900293,0.189205212,0.113435295,0.003352918,0.002226395],[0.0972048,0.075286976,0.004605995,0.013811753,0.056582394,0.101072266,0.056543317,0.072877289,0.020934358,0.017193818,0.00248354,0.122733099,0.052593304,0.185498959,0.115045034,0.003352333,0.002180767],[0.097914675,0.074774155,0.004574703,0.013702805,0.056328757,0.101587604,0.056530022,0.073079768,0.021681874,0.01744197,0.002499478,0.123167625,0.053938485,0.182523148,0.114775085,0.003350217,0.002129629],[0.099576043,0.074513762,0.004510979,0.013790535,0.054936477,0.102373244,0.056416943,0.071862011,0.021244588,0.017117903,0.002358477,0.122855346,0.054387193,0.184539791,0.114098244,0.003310243,0.002108222],[0.103467854,0.075639548,0.004557661,0.013896617,0.054960363,0.101395392,0.056584333,0.07163493,0.021332504,0.017085602,0.002380311,0.122526145,0.055032394,0.179004632,0.115083772,0.003328256,0.002089687],[0.10443898,0.075365188,0.004559036,0.013773469,0.054413705,0.10148268,0.056306167,0.072587974,0.021599764,0.01699053,0.002356788,0.124487648,0.0546347,0.175397042,0.116183964,0.003325187,0.002097179],[0.104196663,0.075003963,0.00465569,0.013501775,0.055014607,0.100211144,0.056598975,0.072168783,0.020432147,0.016899008,0.002365177,0.123008069,0.053599063,0.181637577,0.115332254,0.003302111,0.002072994],[0.105083762,0.074983984,0.004614518,0.013523843,0.054723161,0.10024313,0.056814468,0.071531363,0.020741167,0.01674765,0.002408138,0.123374863,0.053765368,0.181793074,0.114302782,0.003283819,0.002064911],[0.105575572,0.075518456,0.004488684,0.013792597,0.055238282,0.100129009,0.057260851,0.073667037,0.021015457,0.016969811,0.002411576,0.122438358,0.05421793,0.177708858,0.114202106,0.003278612,0.002086803],[0.108050007,0.075261716,0.004484785,0.013955981,0.055016497,0.098303507,0.057074583,0.073590289,0.019980638,0.016742559,0.002379416,0.122580355,0.053422566,0.180019205,0.113796263,0.003217174,0.002124457],[0.110901074,0.076413357,0.004611454,0.013992958,0.056601621,0.098578347,0.058258203,0.074272276,0.019017808,0.016920865,0.002413397,0.120127069,0.053653153,0.176056451,0.112755913,0.003292725,0.002133328],[0.111788138,0.076034513,0.004542135,0.014457285,0.05625276,0.099396888,0.057485766,0.073700321,0.019247754,0.016732347,0.002451313,0.119554569,0.053224983,0.176855279,0.112788166,0.003351857,0.002135927],[0.110822034,0.075537514,0.004521498,0.014446905,0.055763306,0.099109022,0.056915644,0.073357021,0.019057963,0.016588781,0.002418851,0.119920325,0.052782724,0.181374928,0.112029228,0.003245203,0.002109053],[0.11068167,0.07615386,0.004598827,0.01474389,0.056781793,0.100903593,0.05708703,0.073821182,0.019599987,0.016908829,0.002475072,0.120711488,0.051992459,0.176129713,0.112151615,0.003150341,0.002108651],[0.115155498,0.075841227,0.00447524,0.014640181,0.057366052,0.100030195,0.057264288,0.073805292,0.018642994,0.016812556,0.002457662,0.119860587,0.051665106,0.174280635,0.112483757,0.003128182,0.002090547],[0.114321016,0.075769201,0.004470327,0.014500204,0.057642145,0.100096597,0.057169415,0.073729117,0.019917991,0.017304983,0.002434808,0.119184552,0.051127027,0.174817814,0.112315366,0.003114666,0.002084772],[0.115019105,0.076115463,0.004455876,0.014578389,0.057113781,0.099911716,0.056793214,0.072638243,0.019939186,0.017248579,0.002441786,0.119524901,0.0513043,0.174912138,0.112784314,0.003122997,0.002096013],[0.115010907,0.076308074,0.004447548,0.01467141,0.056995498,0.100302621,0.056606605,0.072493996,0.020467979,0.017214728,0.002419804,0.121066026,0.051644698,0.172343972,0.112776275,0.003134854,0.002095006],[0.111123167,0.076116019,0.00454517,0.015185517,0.056895191,0.099899633,0.058611121,0.074504451,0.020681876,0.017173457,0.0023609,0.122315964,0.054235644,0.167656423,0.113403203,0.003173315,0.002118949],[0.108531727,0.075757617,0.004721112,0.015120179,0.056563968,0.099736328,0.05807999,0.075327311,0.021046723,0.017337765,0.002338625,0.122066432,0.056731975,0.167946673,0.113424081,0.003159661,0.002109832],[0.108010948,0.076454884,0.004806664,0.014972003,0.056396397,0.100611268,0.057628071,0.075129185,0.020831845,0.017352031,0.002393732,0.121973761,0.056625376,0.166252529,0.115070439,0.003377273,0.002113592],[0.108862742,0.075652395,0.004663941,0.014646193,0.057060472,0.099199477,0.056458316,0.074298762,0.020560589,0.017212615,0.002401932,0.119780608,0.054155562,0.176172909,0.113477035,0.003296883,0.002099571],[0.109124907,0.0752576,0.004587726,0.014562215,0.056161079,0.100334212,0.056407361,0.073784282,0.019945296,0.017202324,0.002448993,0.12018001,0.054828219,0.1772994,0.112601319,0.003187318,0.00208774],[0.107152532,0.074161276,0.004574396,0.014139994,0.055544393,0.099811661,0.055777638,0.072187622,0.01973426,0.017205852,0.002445885,0.118888242,0.054286513,0.186892975,0.112002033,0.003152217,0.002042512],[0.107516375,0.073408501,0.004361644,0.014127289,0.053346644,0.100143923,0.054422926,0.070359825,0.019029437,0.01667783,0.002353223,0.121793971,0.053963388,0.190474264,0.112962531,0.003051481,0.002006747],[0.107899038,0.072669673,0.00432084,0.01376944,0.051633959,0.100024945,0.054438632,0.071079735,0.01959398,0.01653467,0.002348141,0.123117301,0.054400058,0.190579704,0.112608813,0.003013589,0.001967481],[0.107826537,0.072534649,0.004375813,0.01344905,0.051075203,0.100013298,0.054404697,0.070530447,0.019186643,0.016531333,0.002326959,0.127006157,0.054763075,0.187332744,0.113674146,0.002991768,0.00197748],[0.107998027,0.072568311,0.004250369,0.013406002,0.051112944,0.098510209,0.054407052,0.070820204,0.018701159,0.016438692,0.002290224,0.126082415,0.054905407,0.190515662,0.113058695,0.002982192,0.001952437],[0.10971096,0.073513755,0.004366821,0.0135265,0.051587798,0.100316965,0.054836453,0.071131882,0.019097399,0.016968364,0.002338866,0.127918072,0.054575179,0.180501308,0.114618469,0.003024797,0.001966412],[0.108537114,0.07385411,0.004383385,0.013548695,0.052071306,0.100533489,0.054175169,0.070676056,0.018943145,0.017053849,0.002330961,0.126810595,0.054580375,0.183017676,0.114431774,0.003070158,0.001982144],[0.106693283,0.074689881,0.004318908,0.013596547,0.053141398,0.101692904,0.054190001,0.071508437,0.019156999,0.016943123,0.002358012,0.127633201,0.054464445,0.179137124,0.115404154,0.003035911,0.00203567],[0.106556373,0.074232523,0.00434522,0.013796726,0.053950796,0.101562411,0.054089204,0.071495997,0.019058499,0.016987574,0.002366796,0.125797081,0.053757164,0.181701305,0.115256066,0.003023614,0.00202265],[0.106255158,0.074283005,0.00430532,0.01404249,0.05422501,0.102607883,0.053948016,0.070041311,0.018776167,0.016798926,0.002321511,0.124515026,0.054893022,0.182638319,0.11534517,0.003008964,0.001994701],[0.104868962,0.07421461,0.004153845,0.014329831,0.053481261,0.104280485,0.05415335,0.068947416,0.018778814,0.016384894,0.00225566,0.125941378,0.053747368,0.184924615,0.114685667,0.002859488,0.001992357],[0.106356319,0.074452606,0.004120061,0.014012726,0.054112834,0.105797345,0.053787175,0.067258446,0.01929159,0.016572421,0.002234691,0.125838694,0.054379898,0.182094096,0.114877967,0.002840361,0.001972767],[0.106441262,0.074859711,0.004114951,0.014241859,0.05379354,0.104844561,0.053956865,0.068215267,0.019443404,0.01667271,0.002282969,0.125013987,0.054274501,0.181954968,0.115085325,0.002810363,0.001993759],[0.108165147,0.073257037,0.004065931,0.014144519,0.053749387,0.105112723,0.054426264,0.068183034,0.019476395,0.016603367,0.002306099,0.124232922,0.053624412,0.183586639,0.11433832,0.002732787,0.001995018],[0.108698758,0.073537709,0.004030898,0.014106894,0.053793191,0.105628702,0.05428221,0.066559119,0.0198451,0.016495886,0.002258671,0.12337402,0.052445239,0.186420874,0.113831406,0.002680473,0.00201085],[0.108921465,0.073390138,0.004064018,0.014350378,0.053284366,0.105135294,0.05394782,0.066826484,0.02017084,0.016619018,0.002303734,0.123985838,0.051767632,0.187359025,0.113285378,0.002601274,0.001987298],[0.11078266,0.073369985,0.004131293,0.014708356,0.052444261,0.105453384,0.054038169,0.067858069,0.0202435,0.016533253,0.002324441,0.123322444,0.052140087,0.184382331,0.113632944,0.002648787,0.001986036],[0.113958752,0.073194511,0.00401625,0.014810286,0.051331735,0.105500973,0.054572371,0.067530942,0.020303315,0.016476048,0.0022944,0.122757187,0.05226092,0.183898581,0.112571437,0.002532511,0.001989782],[0.116038499,0.073187903,0.003962275,0.015114436,0.050436626,0.107658535,0.053787661,0.066707594,0.021108414,0.016428887,0.002263933,0.12312035,0.045272766,0.188054683,0.112352991,0.00254428,0.001960168],[0.116662878,0.072527591,0.003955435,0.014910573,0.0507851,0.109559092,0.053166796,0.067660755,0.021245641,0.016066072,0.002221396,0.123073087,0.044277282,0.186228661,0.113259626,0.002482546,0.001917467],[0.117232914,0.071663015,0.003802695,0.015012713,0.05082344,0.111801541,0.051443512,0.067858284,0.021811619,0.015582749,0.002142147,0.121383835,0.042390076,0.189283555,0.113442599,0.002384162,0.001941144],[0.117341326,0.071606177,0.0038018,0.015029457,0.051063676,0.112321708,0.051944622,0.067703381,0.02192386,0.015398652,0.002056232,0.12088759,0.042182884,0.187306016,0.11513717,0.0023955,0.001899949],[0.119513028,0.072007639,0.003805923,0.014712734,0.051730115,0.11171901,0.053412272,0.0651516,0.022653662,0.015808892,0.002189903,0.122226647,0.042600517,0.180061295,0.117972299,0.002475297,0.001959166],[0.118256395,0.070045498,0.003750195,0.014491444,0.053031,0.110692863,0.052871964,0.064361178,0.022727003,0.015897894,0.002176224,0.121441929,0.043155422,0.186424618,0.116213057,0.002517569,0.001945746],[0.119759069,0.070588129,0.003656983,0.014892289,0.052747551,0.111667446,0.053410989,0.061916427,0.02352123,0.0157664,0.00218678,0.120252079,0.041500133,0.18634789,0.117454387,0.002401928,0.00193029],[0.121180947,0.070818927,0.003767456,0.014913056,0.051415324,0.111580973,0.052953593,0.060004977,0.023252242,0.015622144,0.002144721,0.121268667,0.039626428,0.189288085,0.11799233,0.002299426,0.001870704],[0.120924965,0.071158177,0.003790896,0.014902232,0.05260474,0.109483158,0.054163106,0.060725147,0.023412248,0.015675068,0.002171165,0.12099822,0.040703375,0.188195403,0.116934149,0.002332677,0.001825276],[0.118379675,0.070985165,0.003905591,0.014984283,0.052285004,0.109863291,0.055412621,0.061282699,0.022563439,0.015477999,0.002201828,0.119094386,0.041121254,0.194008638,0.114325747,0.002281272,0.001827108],[0.115885839,0.071553461,0.003928971,0.015199774,0.052759038,0.108149896,0.05474428,0.062670074,0.02159242,0.015609357,0.002303431,0.120011021,0.042824359,0.193872863,0.11464778,0.002383767,0.001863667],[0.114949712,0.073476634,0.003980294,0.015467468,0.051762879,0.107350595,0.054960612,0.06340596,0.021369518,0.015661282,0.002344954,0.120036414,0.04361776,0.192130939,0.115129934,0.002433296,0.001921748],[0.116189108,0.076736858,0.003728763,0.015493089,0.051043472,0.108725738,0.061784104,0.066392959,0.016729692,0.016067681,0.002384248,0.121903554,0.046528085,0.175616556,0.116206883,0.002504721,0.001964488],[0.115134883,0.076331268,0.003987135,0.015458836,0.051000659,0.11113273,0.060153097,0.06605542,0.016756429,0.015989635,0.002374902,0.120120172,0.046296937,0.178330528,0.116345811,0.002595154,0.001936404],[0.115004033,0.076067472,0.003992978,0.015422895,0.05192639,0.110382797,0.059870723,0.067005387,0.017467049,0.015977785,0.002327828,0.119983656,0.045110959,0.179323705,0.115533973,0.002555555,0.002046816],[0.114453827,0.075833292,0.004096059,0.01574906,0.052008365,0.111342574,0.060027447,0.066342775,0.017227221,0.015883639,0.002291539,0.119190079,0.045130618,0.180850854,0.114938991,0.002632134,0.002001527],[0.116048459,0.077060474,0.004026752,0.015754394,0.051830605,0.111633882,0.060342202,0.066027432,0.017896485,0.015910453,0.002353473,0.121548185,0.045039184,0.175326406,0.114552394,0.002585493,0.002063728],[0.114811899,0.076973999,0.004072026,0.015825887,0.052655118,0.110870909,0.060159148,0.067117506,0.017656224,0.016051387,0.00246747,0.125532711,0.045493868,0.169655366,0.115891623,0.002642772,0.002122087],[0.11532438,0.078126365,0.00416043,0.01563123,0.052926042,0.111159182,0.059908964,0.067342132,0.017118393,0.015949306,0.002500387,0.124685309,0.045674453,0.169914519,0.114832786,0.00258485,0.002161272],[0.114250985,0.077631567,0.004109666,0.015465811,0.052350507,0.110863248,0.05955192,0.067493475,0.017069831,0.015954998,0.002530697,0.124965398,0.045445812,0.173427443,0.11415225,0.002572783,0.002163609],[0.113303827,0.07804698,0.004390769,0.015955102,0.052016408,0.110596915,0.059333864,0.068146728,0.017044105,0.01595398,0.002554752,0.127806087,0.045379204,0.170359115,0.114430652,0.002522338,0.002159175],[0.114104548,0.078192476,0.004323038,0.016237793,0.051985782,0.1105847,0.058999153,0.068460759,0.017333998,0.016134889,0.002586926,0.130220654,0.045269475,0.16643274,0.114360421,0.002605113,0.002167538],[0.113043605,0.078174478,0.004298887,0.016307599,0.051669931,0.11274025,0.059078572,0.069614668,0.017211132,0.016430847,0.002640272,0.129963784,0.044873824,0.165879,0.113251135,0.002595095,0.002226922],[0.11262037,0.078508718,0.00431796,0.016509033,0.050865173,0.113777913,0.058718552,0.068923816,0.017191355,0.016352863,0.002662401,0.126769532,0.045208441,0.168117841,0.114559523,0.002612997,0.002283512],[0.113561955,0.078099773,0.004458939,0.016342142,0.050569179,0.1128828,0.059279121,0.068603823,0.016969943,0.016311738,0.002665664,0.127567115,0.044998306,0.168262218,0.114492111,0.002616199,0.002318972],[0.113634579,0.078892113,0.004474722,0.015965273,0.050711365,0.11281333,0.058982802,0.069323431,0.016958022,0.016143903,0.002651788,0.12677638,0.044732001,0.169117356,0.114011362,0.002564148,0.002247426],[0.113982965,0.079008521,0.004404171,0.015671708,0.052584134,0.111009804,0.059122712,0.069897948,0.016844597,0.01616199,0.002602301,0.12526592,0.045948621,0.168760207,0.113884461,0.002679096,0.002170845],[0.111321453,0.077909841,0.004397804,0.015533225,0.0525322,0.110023905,0.059991617,0.07021655,0.017159548,0.016134472,0.00260117,0.122918618,0.04576633,0.17339403,0.115305433,0.002660662,0.002133143],[0.110322216,0.077666208,0.004358894,0.015780869,0.052957407,0.108896497,0.058816118,0.069292756,0.017150661,0.015988477,0.002545636,0.122872589,0.045571371,0.177042925,0.116034392,0.0025925,0.002110482],[0.107190908,0.077590817,0.004258255,0.015639639,0.052188764,0.108500332,0.058478463,0.069240355,0.017308956,0.015732616,0.002509963,0.127298923,0.046086876,0.179351225,0.113978917,0.002549859,0.002095133],[0.107164506,0.077078909,0.00430099,0.015641829,0.052122253,0.106986127,0.058487036,0.068919218,0.017338176,0.015747328,0.002488426,0.127731372,0.044980794,0.181512087,0.114912134,0.002525761,0.002063052],[0.10825545,0.076904776,0.004260341,0.015546986,0.051446679,0.107836678,0.058088664,0.068218442,0.017316282,0.015625389,0.002482671,0.126103952,0.045164731,0.18069184,0.117516584,0.002486095,0.002054441],[0.108276005,0.076207318,0.004155541,0.015341096,0.052082615,0.107668409,0.057410688,0.067007583,0.017976991,0.015580093,0.002540837,0.123675863,0.044154089,0.187179743,0.11625478,0.002461946,0.002026403],[0.106785245,0.075199731,0.004024441,0.01511076,0.051312701,0.106186015,0.056913132,0.066180346,0.017878884,0.015274469,0.00247848,0.123872968,0.044014113,0.192184904,0.118270347,0.002346829,0.001966634],[0.108962445,0.075008035,0.00422418,0.015208989,0.05153143,0.108703693,0.057355828,0.065555212,0.01762805,0.015453868,0.002482966,0.12340654,0.04343586,0.188446779,0.11824486,0.002329161,0.002022103],[0.10852419,0.074775221,0.004235127,0.014815325,0.051681025,0.108023729,0.057951013,0.065762967,0.017806118,0.015437794,0.002644346,0.122826824,0.04372551,0.189508582,0.117935636,0.002348951,0.001997643],[0.108818245,0.075277361,0.004242944,0.01497366,0.051200425,0.108182798,0.058593458,0.065402369,0.01814654,0.015445013,0.002614052,0.124059793,0.043565488,0.187740206,0.117465069,0.002312391,0.001960187],[0.108644536,0.074916072,0.004501461,0.014853296,0.05143568,0.108054377,0.057900145,0.066068822,0.017733108,0.015212034,0.002699933,0.124138231,0.043410379,0.188178779,0.117968313,0.002314545,0.001970287],[0.109557376,0.075163834,0.0045568,0.015039977,0.050727355,0.108070701,0.05756894,0.065928794,0.017179796,0.015107004,0.002800202,0.124028297,0.042483146,0.189130774,0.118430783,0.002266591,0.001959631]],"errors":{},"gone":{}}}};
+// Backtest engine, mockup copy. Mirrors simulate() in bt_proto.py.
+const BT = (() => {
+  const DAY = 864e5;
+
+  function periodKeys(sessions, start, freq) {
+    if (!freq) return null;
+    const d = sessions.map(s => new Date(s + "T00:00:00Z"));
+    if (freq === "1M") return d.map(x => x.getUTCFullYear() * 12 + x.getUTCMonth() + 1);
+    if (freq === "1Q") return d.map(x => x.getUTCFullYear() * 4 + Math.floor(x.getUTCMonth() / 3));
+    if (freq === "2W") {
+      const s = d[start];
+      const mon = s.getTime() - ((s.getUTCDay() + 6) % 7) * DAY;
+      return d.map(x => Math.floor(Math.round((x.getTime() - mon) / DAY) / 14));
+    }
+    throw new Error("unknown frequency " + freq);
+  }
+
+  function simulate(p, sessions, start, cfg) {
+    const R = p.ret, T = p.target, N = R.length, n = p.names.length;
+    const lag = cfg.lag_sessions;
+    const keys = periodKeys(sessions, start, p.freq);
+    const groups = [...new Set(p.groups)].sort();
+    const gi = p.groups.map(g => groups.indexOf(g));
+    const drift = (w, t) => {
+      const acc = new Array(groups.length).fill(0);
+      for (let k = 0; k < n; k++) acc[gi[k]] += w[k] - t[k];
+      return 0.5 * acc.reduce((s, v) => s + Math.abs(v), 0);
+    };
+    let w = new Array(n).fill(0), nav = 1, invested = false, tgt = null, pending = null;
+    const navs = [], events = [];
+
+    const fill = i => {
+      const t = pending.t;
+      let turn, cost;
+      if (invested) {
+        turn = 0;
+        for (let k = 0; k < n; k++) turn += Math.abs(t[k] - w[k]);
+        turn *= 0.5;
+        cost = turn * (2 * cfg.brokerage_bps + cfg.sell_tax_bps) / 1e4;
+      } else {
+        turn = t.reduce((s, v) => s + v, 0);
+        cost = turn * cfg.brokerage_bps / 1e4;
+      }
+      nav *= 1 - cost;
+      w = t.slice(); tgt = t; invested = true;
+      events.push({ decision: pending.decision, fill: i, trigger: pending.trigger,
+        drift: pending.drift, turnover: turn, cost,
+        holdings: t.filter(v => v > 1e-12).length,
+        gone: p.gone[pending.decision] || null });
+      pending = null;
+    };
+
+    for (let i = start; i < N; i++) {
+      if (i > start) {
+        const r = R[i];
+        let pr = 0;
+        for (let k = 0; k < n; k++) pr += w[k] * r[k];
+        nav *= 1 + pr;
+        for (let k = 0; k < n; k++) w[k] = w[k] * (1 + r[k]) / (1 + pr);
+      }
+      if (pending && pending.fill === i) fill(i);
+      if (!pending && i + lag < N) {
+        const sched = i === start || (keys && keys[i] !== keys[i - 1]);
+        if (sched) {
+          if (p.errors[i]) throw new Error(`${sessions[i]}: ${p.errors[i]}`);
+          pending = { fill: i + lag, decision: i, t: T[i],
+            trigger: invested ? "calendar" : "inception",
+            drift: invested ? drift(w, tgt) : null };
+        } else if (p.drift != null && invested) {
+          const dr = drift(w, tgt);
+          if (dr > p.drift) pending = { fill: i + lag, decision: i, t: tgt, trigger: "drift", drift: dr };
+        }
+        if (pending && lag === 0) fill(i);
+      }
+      navs.push(nav);
+    }
+    return { nav: navs, events, w, tgt };
+  }
+
+  function mean(a) { return a.reduce((s, v) => s + v, 0) / a.length; }
+  function sd(a) { const m = mean(a); return Math.sqrt(mean(a.map(v => (v - m) ** 2))); }
+  function rets(a) { const r = []; for (let i = 1; i < a.length; i++) r.push(a[i] / a[i - 1] - 1); return r; }
+
+  function stats(nav, bench, events, rf) {
+    const n = nav.length, years = (n - 1) / 252;
+    const one = (lv) => {
+      const r = rets(lv), tr = lv[n - 1] / lv[0] - 1;
+      const ann = (1 + tr) ** (1 / years) - 1, vol = sd(r) * Math.sqrt(252);
+      let peak = lv[0], mdd = 0;
+      for (const v of lv) { peak = Math.max(peak, v); mdd = Math.min(mdd, v / peak - 1); }
+      return { tr, ann, vol, sharpe: (ann - rf) / vol, mdd, r };
+    };
+    const P = one(nav), B = one(bench);
+    const act = P.r.map((v, i) => v - B.r[i]);
+    const mb = mean(B.r), mp = mean(P.r);
+    const cov = mean(P.r.map((v, i) => (v - mp) * (B.r[i] - mb)));
+    const te = sd(act) * Math.sqrt(252);
+    const later = events.filter(e => e.trigger !== "inception");
+    return { P, B, te, ir: (P.ann - B.ann) / te, beta: cov / (sd(B.r) ** 2),
+      turnover: later.reduce((s, e) => s + e.turnover, 0),
+      cost: events.reduce((s, e) => s + e.cost, 0),
+      nCal: events.filter(e => e.trigger === "calendar").length,
+      nDrift: events.filter(e => e.trigger === "drift").length, years };
+  }
+
+  return { simulate, stats, periodKeys };
+})();
+if (typeof module !== "undefined") module.exports = BT;
+
+</script>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const S = D.sessions, N = S.length;
+  const names = Object.keys(D.portfolios);
+  const BENCH = ["VNINDEX", "VN30", "VN100"].filter(b => D.bench[b]);
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const pct = (v, d = 2) => (v * 100).toFixed(d) + "%";
+  const spct = (v, d = 2) => (v >= 0 ? "+" : "−") + Math.abs(v * 100).toFixed(d) + "%";
+  const pp = (v, d = 2) => (v >= 0 ? "+" : "−") + Math.abs(v * 100).toFixed(d) + " pp";
+  const num2 = v => (v < 0 ? "−" : "") + Math.abs(v).toFixed(2);
+  const sign = v => v >= 0 ? "pos" : "negv";
+  const FREQ = { "2W": "Every 2 weeks", "1M": "Monthly", "1Q": "Quarterly" };
+  const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+  const st = { name: names.includes("hsc_strat_high_growth") ? "hsc_strat_high_growth" : names[0],
+    start: 0, bench: BENCH[0], cfg: {} };
+  names.forEach(n => st.cfg[n] = { ...D.config });
+  let cur = null;
+
+  $("pf").innerHTML = names.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join("");
+  $("bench").innerHTML = BENCH.map(b => `<button type="button" data-b="${b}">${b}</button>`).join("");
+  $("start").min = S[0];
+
+  const maxStart = () => Math.max(0, N - 2 - st.cfg[st.name].lag_sessions);
+  const snapTo = iso => { let i = S.findIndex(s => s >= iso); if (i < 0) i = N - 1; return Math.min(i, maxStart()); };
+
+  function syncInputs() {
+    const c = st.cfg[st.name];
+    $("pf").value = st.name;
+    $("start").max = S[maxStart()];
+    $("start").value = S[st.start];
+    const put = (id, v) => { if (document.activeElement !== $(id)) $(id).value = v; };  // never rewrite a field mid-typing
+    put("c_brok", c.brokerage_bps); put("c_tax", c.sell_tax_bps);
+    put("c_lag", c.lag_sessions); put("c_rf", +(c.risk_free_rate * 100).toFixed(4));
+    document.querySelectorAll("#bench button").forEach(b => b.setAttribute("aria-pressed", b.dataset.b === st.bench));
+  }
+
+  function niceTicks(lo, hi, count) {
+    const raw = (hi - lo) / count, mag = 10 ** Math.floor(Math.log10(raw));
+    const step = [1, 2, 2.5, 5, 10].map(m => m * mag).find(s => s >= raw);
+    const a = Math.floor(lo / step) * step, b = Math.ceil(hi / step) * step, out = [];
+    for (let v = a; v <= b + step / 2; v += step) out.push(+v.toFixed(10));
+    return out;
+  }
+
+  const M = { l: 52, r: 14 };
+  function xScale(n) { return i => M.l + (n <= 1 ? 0 : i / (n - 1) * (1000 - M.l - M.r)); }
+  function monthTicks(idx) {
+    const t = [];
+    idx.forEach((si, i) => { if (i === 0 || S[si].slice(0, 7) !== S[idx[i - 1]].slice(0, 7)) t.push(i); });
+    return t;
+  }
+  function xAxis(x, idx, h) {
+    const ticks = monthTicks(idx);
+    const every = Math.ceil(ticks.length / 9);
+    return ticks.filter((_, k) => k % every === 0).map(i => {
+      const d = S[idx[i]], m = +d.slice(5, 7) - 1;
+      const lab = m === 0 || i === 0 ? `${MON[m]} ${d.slice(2, 4)}` : MON[m];
+      return `<line class="gridl" x1="${x(i)}" x2="${x(i)}" y1="12" y2="${h}" opacity=".55"/>` +
+        `<text class="ax" x="${x(i)}" y="${h + 16}" text-anchor="middle">${lab}</text>`;
+    }).join("");
+  }
+  const path = (vals, x, y) => vals.map((v, i) => (i ? "L" : "M") + x(i).toFixed(1) + " " + y(v).toFixed(1)).join("");
+
+  function drawMain(P, B, idx, events, start) {
+    const H = 272, top = 12, all = P.concat(B);
+    const ticks = niceTicks(Math.min(...all), Math.max(...all), 5);
+    const lo = ticks[0], hi = ticks[ticks.length - 1];
+    const x = xScale(P.length), y = v => top + (hi - v) / (hi - lo) * (H - top);
+    let g = ticks.map(t => `<line class="${t === 100 ? "zero" : "gridl"}" x1="${M.l}" x2="${1000 - M.r}" y1="${y(t)}" y2="${y(t)}"/>` +
+      `<text class="ax" x="${M.l - 8}" y="${y(t) + 4}" text-anchor="end">${t}</text>`).join("");
+    g += xAxis(x, idx, H);
+    g += `<path class="lb" d="${path(B, x, y)}"/><path class="lp" d="${path(P, x, y)}"/>`;
+    g += events.map(e => { const i = e.fill - start; return `<circle class="mk-${e.trigger}" cx="${x(i)}" cy="${y(P[i])}" r="4.5"><title>${e.trigger} fill ${S[e.fill]}</title></circle>`; }).join("");
+    g += `<circle cx="${x(P.length - 1)}" cy="${y(P[P.length - 1])}" r="3.5" fill="var(--accent)"/>`;
+    g += `<line class="cross" id="xh" x1="0" x2="0" y1="${top}" y2="${H}" visibility="hidden"/>`;
+    $("chart").innerHTML = g;
+    return x;
+  }
+
+  function drawExcess(E, idx) {
+    const H = 86, top = 6;
+    const ticks = niceTicks(Math.min(0, ...E), Math.max(0, ...E), 2);
+    const lo = ticks[0], hi = ticks[ticks.length - 1];
+    const x = xScale(E.length), y = v => top + (hi - v) / (hi - lo || 1) * (H - top);
+    const y0 = y(0);
+    let g = ticks.map(t => `<line class="${t === 0 ? "zero" : "gridl"}" x1="${M.l}" x2="${1000 - M.r}" y1="${y(t)}" y2="${y(t)}"/>` +
+      `<text class="ax" x="${M.l - 8}" y="${y(t) + 4}" text-anchor="end">${t > 0 ? "+" : ""}${+(t * 100).toFixed(1)}%</text>`).join("");
+    g += xAxis(x, idx, H);
+    const up = E.map(v => Math.max(v, 0)), dn = E.map(v => Math.min(v, 0));
+    const area = vals => `M${x(0)} ${y0}` + vals.map((v, i) => `L${x(i).toFixed(1)} ${y(v).toFixed(1)}`).join("") + `L${x(vals.length - 1)} ${y0}Z`;
+    g += `<path class="ex-up" d="${area(up)}"/><path class="ex-dn" d="${area(dn)}"/><path class="lx" d="${path(E, x, y)}"/>`;
+    g += `<line class="cross" id="xh2" x1="0" x2="0" y1="${top}" y2="${H}" visibility="hidden"/>`;
+    $("excess").innerHTML = g;
+  }
+
+  // Draft settings live in st; results come from the last run. Portfolio,
+  // start, costs and lag need a run; benchmark and risk-free rate apply at once.
+  let run = null, runErr = null;
+  const RUNKEYS = ["brokerage_bps", "sell_tax_bps", "lag_sessions"];
+  const RES = ["results", "perf", "logp", "holdp"];
+  function dirty() {
+    const r = run || runErr;
+    if (!r) return true;
+    const c = st.cfg[st.name];
+    return r.name !== st.name || r.start !== st.start || RUNKEYS.some(k => c[k] !== r.cfg[k]);
+  }
+
+  function doRun() {
+    st.start = Math.min(st.start, maxStart());
+    const c = st.cfg[st.name];
+    const snap = { name: st.name, start: st.start, cfg: { ...c }, at: new Date() };
+    try { run = { ...snap, out: BT.simulate(D.portfolios[st.name], S, st.start, c) }; runErr = null; }
+    catch (e) { run = null; runErr = { ...snap, msg: e.message }; }
+    render();
+  }
+
+  function render() {
+    st.start = Math.min(st.start, maxStart());
+    syncInputs();
+    $("crumbs").textContent = `portfolios / ${st.name} / backtest`;
+    $("cfgfile").textContent = `portfolio/${st.name}/backtest_config.json`;
+    $("snap").textContent = `First session ${S[st.start]} · ${N - st.start} sessions to ${S[N - 1]}`;
+    const d = dirty();
+    $("stale").hidden = !(d && run);
+    $("results").classList.toggle("stale", d && !!run);
+    ["perf", "logp", "holdp"].forEach(id => $(id).classList.toggle("stale", d && !!run));
+    $("run").classList.toggle("primary", d);
+    $("run").textContent = d ? "Run backtest" : "Up to date";
+
+    $("fail").hidden = !runErr;
+    if (runErr) $("fail").textContent = `FAIL  ${runErr.msg}. The mandate cannot be solved on that date; pick a later start or loosen the constraints.`;
+    RES.forEach(id => { $(id).hidden = !run; });
+    if (!run) { $("stamp").textContent = ""; cur = null; return; }
+
+    const name = run.name, start = run.start, out = run.out;
+    const p = D.portfolios[name];
+    const c = { ...run.cfg, risk_free_rate: st.cfg[name].risk_free_rate };
+    const hhmm = run.at.toTimeString().slice(0, 8);
+    $("stamp").textContent = `Run ${hhmm} · ${name} · from ${S[start]} · lag ${c.lag_sessions} · ` +
+      `brokerage ${c.brokerage_bps} bps a side, sell tax ${c.sell_tax_bps} bps · ${p.freq || "no calendar"}, drift ${p.drift != null ? pct(p.drift, 0) : "off"}`;
+    $("lagtxt").textContent = c.lag_sessions === 1 ? "1 session" : `${c.lag_sessions} sessions`;
+    $("window").textContent = `${S[start]} → ${S[N - 1]} vs ${st.bench}`;
+
+    const idx = []; for (let i = start; i < N; i++) idx.push(i);
+    const b0 = D.bench[st.bench][start];
+    const P = out.nav.map(v => v * 100), B = idx.map(i => D.bench[st.bench][i] / b0 * 100);
+    const E = P.map((v, i) => v / B[i] - 1);
+    const s = BT.stats(out.nav, B, out.events, c.risk_free_rate);
+    cur = { P, B, E, idx, x: drawMain(P, B, idx, out.events, start) };
+    drawExcess(E, idx);
+
+    const ex = s.P.tr - s.B.tr;
+    $("figs").innerHTML = [
+      ["Portfolio", spct(s.P.tr), `total return, ${N - start} sessions`, sign(s.P.tr)],
+      [st.bench, spct(s.B.tr), "price return", sign(s.B.tr)],
+      ["Excess", pp(ex), `IR ${num2(s.ir)} · TE ${pct(s.te, 1)}`, sign(ex)],
+      ["Max drawdown", pct(s.P.mdd), `${st.bench} ${pct(s.B.mdd)}`, "negv"],
+    ].map(([l, v, sub, cls]) => `<div class="fig"><span class="label">${esc(l)}</span><span class="big ${cls}">${v}</span><span class="sub">${esc(sub)}</span></div>`).join("");
+    $("key").innerHTML = `<span><i></i>${esc(name)}</span><span><i class="b"></i>${st.bench}</span>` +
+      `<span><i class="d"></i>calendar fill</span>${p.drift != null ? '<span><i class="d w"></i>drift fill</span>' : ""}`;
+
+    $("annnote").textContent = s.years < 1 ? `annualised over ${(s.years * 252).toFixed(0)} sessions` : "";
+    const row = (l, a, b, d, cls = "") => `<tr><td>${l}</td><td class="n num">${a}</td><td class="n num">${b}</td><td class="n num ${cls}">${d}</td></tr>`;
+    $("cmp").innerHTML = `<thead><tr><th></th><th class="n">Portfolio</th><th class="n">${st.bench}</th><th class="n">Diff</th></tr></thead><tbody>` +
+      row("Total return", spct(s.P.tr), spct(s.B.tr), pp(ex), sign(ex)) +
+      row("Annualised return", spct(s.P.ann), spct(s.B.ann), pp(s.P.ann - s.B.ann), sign(s.P.ann - s.B.ann)) +
+      row("Volatility, annualised", pct(s.P.vol), pct(s.B.vol), pp(s.P.vol - s.B.vol)) +
+      row(`Sharpe, rf ${pct(c.risk_free_rate, 1)}`, num2(s.P.sharpe), num2(s.B.sharpe), (s.P.sharpe - s.B.sharpe >= 0 ? "+" : "−") + Math.abs(s.P.sharpe - s.B.sharpe).toFixed(2)) +
+      row("Max drawdown", pct(s.P.mdd), pct(s.B.mdd), pp(s.P.mdd - s.B.mdd), sign(s.P.mdd - s.B.mdd)) + "</tbody>";
+    const kv = (l, v) => `<tr><td>${l}</td><td class="n num">${v}</td></tr>`;
+    $("rel").innerHTML = "<tbody>" +
+      kv("Tracking error, annualised", pct(s.te)) + kv("Information ratio", num2(s.ir)) +
+      kv(`Beta to ${st.bench}`, num2(s.beta)) +
+      kv("Rebalances", `${s.nCal} calendar · ${p.drift != null ? s.nDrift + " drift" : "drift off"}`) +
+      kv("Turnover after inception, one-way", pct(s.turnover, 1)) +
+      kv("Trading costs, incl. inception", (s.cost * 1e4).toFixed(1) + " bps") + "</tbody>";
+
+    const H = p.holdings;
+    $("log").innerHTML = `<thead><tr><th>Decision</th><th>Fill</th><th>Trigger</th><th class="n">Group drift</th><th class="n">Turnover</th><th class="n">Cost</th><th class="n">Holdings</th><th>Note</th></tr></thead><tbody>` +
+      out.events.map(e => {
+        const inr = e.holdings >= H.min && e.holdings <= H.max;
+        const trig = e.trigger === "drift" ? '<span class="pill warn">drift</span>' : e.trigger === "calendar" ? '<span class="pill cal">calendar</span>' : '<span class="pill off">inception</span>';
+        return `<tr><td class="mono">${S[e.decision]}</td><td class="mono">${S[e.fill]}</td><td>${trig}</td>` +
+          `<td class="n">${e.drift == null ? "—" : pct(e.drift)}</td><td class="n">${pct(e.turnover, 1)}</td><td class="n">${(e.cost * 1e4).toFixed(1)} bps</td>` +
+          `<td class="n"><span class="pill xs ${inr ? "ok" : "warn"}">${e.holdings} ${inr ? "in" : "OUTSIDE"} ${H.min}–${H.max}</span></td>` +
+          `<td>${e.gone ? '<span class="err">no priced names: ' + esc(e.gone.join(", ")) + "</span>" : ""}</td></tr>`;
+      }).join("") + (out.events.length ? "" : `<tr><td colspan="8" class="empty">No fill inside the window</td></tr>`) + "</tbody>";
+
+    $("mandate").innerHTML = [
+      ["Rebalance", p.freq ? `${FREQ[p.freq]} (${p.freq}), first session of the period` : "No calendar; drift only"],
+      ["Drift threshold", p.drift != null ? `${pct(p.drift, 1)} at group grain, ½ Σ |gap|` : "Off"],
+      ["Holdings range", `${H.min}–${H.max}, flagged per rebalance`],
+      ["Constraints", p.constraints === "off" ? "Off" : p.constraints],
+      ["Tactical overlay", p.tactical],
+      ["Book", `As of anchor ${p.anchor}, ${p.names.length} investable names`],
+    ].map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join("");
+
+    const rows = p.names.map((t, k) => ({ t, g: p.groups[k], w: out.w[k], tg: out.tgt ? out.tgt[k] : 0 }))
+      .filter(r => r.w > 1e-12 || r.tg > 1e-12).sort((a, b) => b.w - a.w);
+    const last = out.events.length ? S[out.events[out.events.length - 1].fill] : "—";
+    $("holdnote").textContent = `drifted weight on ${S[N - 1]} vs the target filled ${last}`;
+    $("hold").innerHTML = `<thead><tr><th>Ticker</th><th>Group</th><th class="n">Weight</th><th class="n">Target</th><th class="n">Gap</th></tr></thead><tbody>` +
+      rows.map(r => `<tr><td class="mono">${r.t}</td><td>${esc(r.g)}</td><td class="n">${pct(r.w)}</td><td class="n">${pct(r.tg)}</td><td class="n ${sign(r.w - r.tg)}">${pp(r.w - r.tg)}</td></tr>`).join("") + "</tbody>";
+  }
+
+  function hover(ev) {
+    if (!cur) return;
+    const svg = $("chart"), r = svg.getBoundingClientRect();
+    const vx = (ev.clientX - r.left) / r.width * 1000;
+    const n = cur.P.length;
+    const i = Math.max(0, Math.min(n - 1, Math.round((vx - M.l) / (1000 - M.l - M.r) * (n - 1))));
+    const X = cur.x(i);
+    ["xh", "xh2"].forEach(id => { const l = $(id); if (l) { l.setAttribute("x1", X); l.setAttribute("x2", X); l.setAttribute("visibility", "visible"); } });
+    const tip = $("tip"), wrap = $("cw").getBoundingClientRect();
+    tip.innerHTML = `<b>${S[cur.idx[i]]}</b><span>Portfolio</span><span>${cur.P[i].toFixed(2)}</span><span>${st.bench}</span><span>${cur.B[i].toFixed(2)}</span><span>Excess</span><span>${spct(cur.E[i])}</span>`;
+    tip.hidden = false;
+    const px = r.left - wrap.left + X / 1000 * r.width;
+    tip.style.left = Math.min(px + 12, wrap.width - tip.offsetWidth - 8) + "px";
+    tip.style.top = "14px";
+  }
+  function unhover() { $("tip").hidden = true; ["xh", "xh2"].forEach(id => { const l = $(id); if (l) l.setAttribute("visibility", "hidden"); }); }
+  ["chart", "excess"].forEach(id => { $(id).addEventListener("mousemove", hover); $(id).addEventListener("mouseleave", unhover); });
+
+  $("pf").addEventListener("change", e => { st.name = e.target.value; render(); });
+  $("start").addEventListener("change", e => { if (e.target.value) { st.start = snapTo(e.target.value); render(); } });
+  $("presets").addEventListener("click", e => {
+    const b = e.target.closest("button"); if (!b) return;
+    const y = S[N - 1].slice(0, 4);
+    const last = new Date(S[N - 1] + "T00:00:00Z"); last.setUTCMonth(last.getUTCMonth() - 1);
+    st.start = { first: 0, q2: snapTo(`${y}-04-01`), q3: snapTo(`${y}-07-01`), m1: snapTo(last.toISOString().slice(0, 10)) }[b.dataset.p];
+    render();
+  });
+  $("bench").addEventListener("click", e => { const b = e.target.closest("button"); if (b) { st.bench = b.dataset.b; render(); } });
+  const num = (id, key, scale = 1, int = false) => $(id).addEventListener("input", e => {
+    let v = parseFloat(e.target.value); if (!isFinite(v) || v < 0) return;
+    if (int) v = Math.min(5, Math.round(v));
+    st.cfg[st.name][key] = v / scale; render();
+  });
+  num("c_brok", "brokerage_bps"); num("c_tax", "sell_tax_bps"); num("c_lag", "lag_sessions", 1, true); num("c_rf", "risk_free_rate", 100);
+  $("reset").addEventListener("click", () => { st.cfg[st.name] = { ...D.config }; render(); });
+  ["run", "run2"].forEach(id => $(id).addEventListener("click", doRun));
+  ["start", "c_brok", "c_tax", "c_lag"].forEach(id => $(id).addEventListener("keydown", e => { if (e.key === "Enter") doRun(); }));
+  doRun();
+})();
+</script>

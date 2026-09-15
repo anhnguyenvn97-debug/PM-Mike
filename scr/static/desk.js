@@ -60,6 +60,11 @@ function go(page, port=null, step=0){
   if (port && port !== S.port){ S.port = port; S.P = null; S.preview = null; S.console.flow = null; }
   render(); window.scrollTo({top:0});
   if (page === "flow" && !S.P) loadPortfolio();
+  if (page === "backtest"){
+    const names = S.state.portfolios.map(p => p.name);
+    const want = port || BT.name || S.port || names[0];
+    if (want && (want !== BT.name || !BT.draft)) btLoad(want).then(() => { if (!BT.res && !BT.err) btRun(); });
+  }
 }
 async function refreshState(){ S.state = await api("GET", "/api/state"); }
 
@@ -152,7 +157,8 @@ function renderNav(){
     <div class="label">Workspace</div>
     <button data-go="data" aria-current="${S.page==="data"}">Market data ${st?.sticky ? `<span class="pill ok plain num" style="font-size:11px">${st.sticky.slice(5)}</span>` : ""}</button>
     <button data-go="list" aria-current="${S.page==="list"||S.page==="new"}">Portfolios <span class="num" style="font-size:12px;color:var(--ink-3)">${names.length}</span></button>
-    ${names.map(n => `<button class="sub" data-port="${esc(n)}" aria-current="${S.page==="flow" && S.port===n}">${esc(short(n))}</button>`).join("")}`;
+    ${names.map(n => `<button class="sub" data-port="${esc(n)}" aria-current="${S.page==="flow" && S.port===n}">${esc(short(n))}</button>`).join("")}
+    <button data-go="backtest" aria-current="${S.page==="backtest"}">Backtest</button>`;
   $("#railAnchor").textContent = st?.sticky ? `sticky anchor ${st.sticky}` : "";
   $$("#nav [data-go]").forEach(b => b.onclick = () => go(b.dataset.go));
   $$("#nav [data-port]").forEach(b => b.onclick = () => go("flow", b.dataset.port, S.port===b.dataset.port ? S.step : 0));
@@ -187,10 +193,14 @@ function renderData(){
             <tbody>${m.drops.length ? m.drops.map(dp => `<tr><td class="mono">${esc(dp.file)}</td><td class="n">${dp.mb}</td><td>${dp.newer_than_db ? '<span class="pill xs warn">newer than database</span>' : '<span class="pill xs ok">loaded</span>'}</td></tr>`).join("") : `<tr><td colspan="3" class="empty">No drops</td></tr>`}</tbody>
           </table></div>
           ${m.loads?.length ? `<div class="scroll"><table>
-            <thead><tr><th>Loaded</th><th class="n">Rows</th><th class="n">Dropped</th><th class="n">Tickers</th><th>Range</th></tr></thead>
-            <tbody>${m.loads.map(l => `<tr><td class="mono">${esc(l.file)}</td><td class="n">${bn(l.rows)}</td><td class="n">${bn(l.dropped)}</td><td class="n">${l.tickers}</td><td class="mono">${l.from} → ${l.to}</td></tr>`).join("")}</tbody>
+            <thead><tr><th>Loaded</th><th>Kind</th><th class="n">Rows</th><th class="n">Dropped</th><th class="n">Names</th><th>Range</th></tr></thead>
+            <tbody>${m.loads.map(l => `<tr><td class="mono">${esc(l.file)}</td><td>${l.kind}</td><td class="n">${bn(l.rows)}</td><td class="n">${bn(l.dropped)}</td><td class="n">${l.tickers}</td><td class="mono">${l.from} → ${l.to}</td></tr>`).join("")}</tbody>
           </table></div>` : ""}
-          <p class="note">Drop new exports into <span class="mono">data/fiinpro/</span>. The database is rebuilt from scratch into a temp file and swapped in only if every drop validates.</p>
+          ${m.db ? `<div class="scroll"><table>
+            <thead><tr><th>Benchmark</th><th class="n">Sessions</th><th>Range</th><th>Stock sessions</th></tr></thead>
+            <tbody>${m.benchmarks?.length ? m.benchmarks.map(b => `<tr><td class="mono">${esc(b.code)}</td><td class="n">${b.sessions}</td><td class="mono">${b.from} → ${b.to}</td><td>${b.missing ? `<span class="pill xs warn">${b.missing} missing</span>` : '<span class="pill xs ok">all covered</span>'}</td></tr>`).join("") : `<tr><td colspan="4" class="empty">No index drop loaded</td></tr>`}</tbody>
+          </table></div>` : ""}
+          <p class="note">Drop new exports into <span class="mono">data/fiinpro/</span>: stock exports (a Ticker column) and index exports (an Index/Sector column) side by side. The database is rebuilt from scratch into a temp file and swapped in only if every drop validates. Benchmarks are <b>price</b> indexes: dividends are not reinvested, so a total-return backtest leads them by roughly the dividend yield.</p>
         </div>
         ${consoleBox("ingest")}
       </section>
@@ -372,7 +382,7 @@ function renderFlow(){
   const dirty = P.dirty.book || P.dirty.cons;
   return `<div class="page">
     <div class="head"><div><div class="crumbs">portfolio/${esc(P.name)}/</div><h1>${esc(P.name)}</h1></div>
-      <div class="inline"><button class="btn ghost" id="reload" title="Re-read the files on disk; unsaved edits stay in the page">Reload</button><button class="btn ghost" id="toList">All portfolios</button></div></div>
+      <div class="inline"><button class="btn ghost" id="reload" title="Re-read the files on disk; unsaved edits stay in the page">Reload</button><button class="btn ghost" id="toBt">Backtest</button><button class="btn ghost" id="toList">All portfolios</button></div></div>
     ${P.errors.length ? `<p class="note bad">${P.errors.map(esc).join("<br>")}</p>` : ""}
     <nav class="steps" aria-label="Portfolio flow">${STEPS.map((s,i) => `<button data-step="${i}" aria-current="${i===S.step?"step":"false"}">
       <span class="i">${i+1}${s.opt?'<span class="opt">optional</span>':""}</span><span class="t">${s.t}</span><span class="s">${esc(stepStatus(P, s.k))}</span></button>`).join("")}</nav>
@@ -708,6 +718,7 @@ async function afterSave(){ await Promise.all([loadPortfolio(), refreshState()])
 function bindFlow(){
   const P = S.P; if (!P) return;
   $("#toList").onclick = () => go("list");
+  $("#toBt").onclick = () => go("backtest", P.name);
   $("#reload").onclick = () => afterSave();
   const k = STEPS[S.step].k;
   $$("[data-step]").forEach(b => b.onclick = () => { S.step = +b.dataset.step; render(); });
@@ -776,6 +787,251 @@ function bindFlow(){
   };
 }
 
+/* ---------- page: backtest ----------
+   Every number comes from /backtest (backtest_engine.run). Portfolio, start,
+   costs and lag need a run; benchmark and risk-free rate apply to the last
+   result (the engine returns every benchmark; Sharpe is rescaled by rf). */
+const BT = {name:null, start:null, bench:"VNINDEX", draft:null, saved:null, version:null,
+            defaults:null, cfgErr:null, res:null, req:null, err:null, running:false, cur:null};
+const RUNKEYS = ["brokerage_bps", "sell_tax_bps", "lag_sessions"];
+const MON = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const spct = (v, d=2) => (v >= 0 ? "+" : "−") + Math.abs(v*100).toFixed(d) + "%";
+const spp = (v, d=2) => (v >= 0 ? "+" : "−") + Math.abs(v*100).toFixed(d) + " pp";
+const n2 = v => v === null || v === undefined ? "n/a" : (v < 0 ? "−" : "") + Math.abs(v).toFixed(2);
+const tone = v => v >= 0 ? "pos" : "negv";
+const mpct = v => (v < 0 ? "−" : "") + Math.abs(v*100).toFixed(2) + "%";
+
+async function btLoad(name){
+  BT.name = name; BT.draft = null; render();     // Run disabled until the config is in
+  const d = await api("GET", `/api/p/${encodeURIComponent(name)}/backtest`);
+  if (BT.name !== name) return;
+  BT.draft = {...d.config}; BT.saved = {...d.config}; BT.version = d.version;
+  BT.defaults = d.defaults; BT.cfgErr = d.error;
+  render();
+}
+function btDirty(){
+  const q = BT.req;
+  if (!q || !BT.draft) return true;
+  return q.name !== BT.name || q.start !== BT.start || RUNKEYS.some(k => q.cfg[k] !== BT.draft[k]);
+}
+async function btRun(){
+  if (BT.running || !BT.draft) return;
+  const req = {name:BT.name, start:BT.start, cfg:{...BT.draft}};
+  BT.running = true; render();
+  let r;
+  try { r = await api("POST", `/api/p/${encodeURIComponent(req.name)}/backtest`,
+                      {start:req.start, benchmark:BT.bench, config:req.cfg}); }
+  finally { BT.running = false; }
+  BT.req = req;
+  if (r?.ok){ BT.res = r; BT.err = null; BT.ranAt = new Date().toTimeString().slice(0, 8); } else { BT.res = null; BT.err = r?.error || r?.log || "FAIL"; }
+  render();
+}
+function btSnap(iso){
+  const ss = S.state.sessions;
+  if (!iso) return ss[0];
+  return ss.find(s => s >= iso) ?? null;
+}
+
+function niceTicks(lo, hi, count){
+  if (hi - lo < 1e-9){ lo -= 1; hi += 1; }
+  const raw = (hi - lo) / count, mag = 10 ** Math.floor(Math.log10(raw));
+  const step = [1, 2, 2.5, 5, 10].map(m => m*mag).find(s => s >= raw);
+  const out = [];
+  for (let v = Math.floor(lo/step)*step; v <= Math.ceil(hi/step)*step + step/2; v += step) out.push(+v.toFixed(10));
+  return out;
+}
+const CM = {l:52, r:14};
+const xScale = n => i => CM.l + (n <= 1 ? 0 : i/(n-1)*(1000 - CM.l - CM.r));
+const linePath = (vals, x, y) => vals.map((v, i) => (i ? "L" : "M") + x(i).toFixed(1) + " " + y(v).toFixed(1)).join("");
+function xAxis(dates, x, h){
+  const t = dates.map((d, i) => i === 0 || d.slice(0,7) !== dates[i-1].slice(0,7) ? i : -1).filter(i => i >= 0);
+  const every = Math.ceil(t.length / 9);
+  return t.filter((_, k) => k % every === 0).map(i => { const m = +dates[i].slice(5,7) - 1;
+    return `<line class="gridl" x1="${x(i)}" x2="${x(i)}" y1="8" y2="${h}" opacity=".55"/><text class="ax" x="${x(i)}" y="${h+16}" text-anchor="middle">${m === 0 || i === 0 ? `${MON[m]} ${dates[i].slice(2,4)}` : MON[m]}</text>`; }).join("");
+}
+function btCharts(r, code){
+  const P = r.portfolio.map(v => v*100), B = r.benchmarks[code].equity.map(v => v*100);
+  const E = P.map((v, i) => v / B[i] - 1), n = P.length, x = xScale(n), dates = r.dates;
+  let H = 272, top = 12, tk = niceTicks(Math.min(...P, ...B), Math.max(...P, ...B), 5);
+  let lo = tk[0], hi = tk.at(-1), y = v => top + (hi - v)/(hi - lo)*(H - top);
+  const pos = Object.fromEntries(dates.map((d, i) => [d, i]));
+  let main = tk.map(t => `<line class="${t === 100 ? "zero" : "gridl"}" x1="${CM.l}" x2="${1000-CM.r}" y1="${y(t)}" y2="${y(t)}"/><text class="ax" x="${CM.l-8}" y="${y(t)+4}" text-anchor="end">${t}</text>`).join("")
+    + xAxis(dates, x, H) + `<path class="lb" d="${linePath(B, x, y)}"/><path class="lp" d="${linePath(P, x, y)}"/>`
+    + r.rebalances.map(e => { const i = pos[e.fill]; return `<circle class="mk-${e.trigger}" cx="${x(i)}" cy="${y(P[i])}" r="4.5"><title>${e.trigger} fill ${e.fill}</title></circle>`; }).join("")
+    + `<circle cx="${x(n-1)}" cy="${y(P[n-1])}" r="3.5" fill="var(--accent)"/><line class="cross" id="xh" x1="0" x2="0" y1="${top}" y2="${H}" visibility="hidden"/>`;
+  H = 86; top = 6; tk = niceTicks(Math.min(0, ...E), Math.max(0, ...E), 2); lo = tk[0]; hi = tk.at(-1);
+  y = v => top + (hi - v)/(hi - lo)*(H - top);
+  const y0 = y(0), area = vals => `M${x(0)} ${y0}` + vals.map((v, i) => `L${x(i).toFixed(1)} ${y(v).toFixed(1)}`).join("") + `L${x(n-1)} ${y0}Z`;
+  const ex = tk.map(t => `<line class="${t === 0 ? "zero" : "gridl"}" x1="${CM.l}" x2="${1000-CM.r}" y1="${y(t)}" y2="${y(t)}"/><text class="ax" x="${CM.l-8}" y="${y(t)+4}" text-anchor="end">${t > 0 ? "+" : ""}${+(t*100).toFixed(1)}%</text>`).join("")
+    + xAxis(dates, x, H) + `<path class="ex-up" d="${area(E.map(v => Math.max(v, 0)))}"/><path class="ex-dn" d="${area(E.map(v => Math.min(v, 0)))}"/><path class="lx" d="${linePath(E, x, y)}"/>`
+    + `<line class="cross" id="xh2" x1="0" x2="0" y1="${top}" y2="${H}" visibility="hidden"/>`;
+  BT.cur = {P, B, E, dates, x, code};
+  return {main, ex};
+}
+
+function renderBacktest(){
+  const st = S.state, names = st.portfolios.map(p => p.name);
+  if (!names.length) return `<div class="page"><div class="head"><div><div class="crumbs">backtest</div><h1>Backtest</h1></div></div><p class="note">No portfolio yet. Create one on the Portfolios page.</p></div>`;
+  const codes = (st.market.benchmarks || []).map(b => b.code);
+  const ss = st.sessions, d = BT.draft, r = BT.res, dirty = btDirty();
+  const snapped = btSnap(BT.start);
+  const summ = st.portfolios.find(p => p.name === BT.name);
+  const cfgDirty = d && BT.saved && Object.keys(d).some(k => d[k] !== BT.saved[k]);
+  const field = (k, label, step, hint="") => `<div class="field"><label for="bt_${k}">${label}</label><input type="number" id="bt_${k}" data-cfg="${k}" min="0" step="${step}" value="${d ? (k === "risk_free_rate" ? +(d[k]*100).toFixed(4) : d[k]) : ""}">${hint ? `<span class="hint">${hint}</span>` : ""}</div>`;
+
+  let results = "";
+  if (r){
+    const code = r.benchmarks[BT.bench] ? BT.bench : r.benchmark;
+    const bs = r.benchmarks[code].stats, p = bs.portfolio, b = bs.benchmark, rf = d ? d.risk_free_rate : r.config.risk_free_rate;
+    const shp = s => s.vol > 0 ? (s.annualised - rf) / s.vol : null;
+    const {main, ex} = btCharts(r, code);
+    const h = r.holdings_range, reb = r.rebalance, last = r.rebalances.at(-1);
+    const row = (l, a, c, diff, cls="") => `<tr><td>${l}</td><td class="n num">${a}</td><td class="n num">${c}</td><td class="n num ${cls}">${diff}</td></tr>`;
+    const kv = (l, v) => `<tr><td>${l}</td><td class="n num">${v}</td></tr>`;
+    const c = r.config;
+    results = `
+    <div class="bt-stamp">Run ${esc(BT.ranAt || "")} · ${esc(r.name)} · ${r.start} → ${r.end} · lag ${c.lag_sessions} · brokerage ${c.brokerage_bps} bps a side, sell tax ${c.sell_tax_bps} bps · ${esc(mandateText(reb))}</div>
+    ${r.messages.length ? `<div class="console">${logHtml(r.messages.join("\n"))}</div>` : ""}
+    ${code !== BT.bench ? `<p class="note warn">${esc(BT.bench)} has no close on every session of this window; showing ${esc(code)}.</p>` : ""}
+    <div class="bt-res${dirty ? " stale" : ""}">
+    <section class="panel">
+      <div class="bt-figs">
+        <div class="fig"><span class="label">Portfolio</span><span class="big ${tone(p.total)}">${spct(p.total)}</span><span class="sub">total return, ${bs.sessions} sessions</span></div>
+        <div class="fig"><span class="label">${esc(code)}</span><span class="big ${tone(b.total)}">${spct(b.total)}</span><span class="sub">price return</span></div>
+        <div class="fig"><span class="label">Excess</span><span class="big ${tone(bs.excess)}">${spp(bs.excess)}</span><span class="sub">IR ${n2(bs.information_ratio)} · TE ${pct(bs.tracking_error, 1)}</span></div>
+        <div class="fig"><span class="label">Max drawdown</span><span class="big negv">${mpct(p.max_drawdown)}</span><span class="sub">${esc(code)} ${mpct(b.max_drawdown)}</span></div>
+      </div>
+      <div class="panel-h" style="border-top:1px solid var(--line)"><h2>Growth of 100</h2>
+        <div class="bt-key"><span><i></i>${esc(r.name)}</span><span><i class="b"></i>${esc(code)}</span><span><i class="d"></i>calendar fill</span>${reb.drift_threshold != null ? '<span><i class="d w"></i>drift fill</span>' : ""}</div></div>
+      <div class="bt-chart" id="btCw">
+        <svg id="btMain" viewBox="0 0 1000 300" role="img" aria-label="Portfolio and benchmark growth of 100">${main}</svg>
+        <div class="label" style="padding:6px 8px 0">Excess vs benchmark</div>
+        <svg id="btEx" viewBox="0 0 1000 110" role="img" aria-label="Cumulative excess return">${ex}</svg>
+        <div class="bt-tip" id="btTip" hidden></div>
+      </div>
+    </section>
+    <div class="grid2">
+      <section class="panel"><div class="panel-h"><h2>Performance</h2><span class="label">${bs.years < 1 ? `annualised over ${bs.sessions - 1} sessions` : ""}</span></div>
+        <div class="scroll"><table class="bt-cmp"><thead><tr><th></th><th class="n">Portfolio</th><th class="n">${esc(code)}</th><th class="n">Diff</th></tr></thead><tbody>
+        ${row("Total return", spct(p.total), spct(b.total), spp(bs.excess), tone(bs.excess))}
+        ${row("Annualised return", spct(p.annualised), spct(b.annualised), spp(p.annualised - b.annualised), tone(p.annualised - b.annualised))}
+        ${row("Volatility, annualised", pct(p.vol), pct(b.vol), spp(p.vol - b.vol))}
+        ${row(`Sharpe, rf ${pct(rf, 1)}`, n2(shp(p)), n2(shp(b)), shp(p) !== null && shp(b) !== null ? (shp(p) - shp(b) >= 0 ? "+" : "−") + Math.abs(shp(p) - shp(b)).toFixed(2) : "n/a")}
+        ${row("Max drawdown", mpct(p.max_drawdown), mpct(b.max_drawdown), spp(p.max_drawdown - b.max_drawdown), tone(p.max_drawdown - b.max_drawdown))}
+        </tbody></table></div></section>
+      <section class="panel"><div class="panel-h"><h2>Relative and trading</h2></div>
+        <div class="scroll"><table class="bt-cmp"><tbody>
+        ${kv("Tracking error, annualised", pct(bs.tracking_error))}${kv("Information ratio", n2(bs.information_ratio))}${kv(`Beta to ${esc(code)}`, n2(bs.beta))}
+        ${kv("Rebalances", `${bs.n_calendar} calendar · ${reb.drift_threshold != null ? bs.n_drift + " drift" : "drift off"}`)}
+        ${kv("Turnover after inception, one-way", pct(bs.turnover, 1))}${kv("Trading costs, incl. inception", (bs.cost*1e4).toFixed(1) + " bps")}
+        </tbody></table></div></section>
+    </div>
+    <section class="panel"><div class="panel-h"><h2>Rebalance log</h2><span class="label">decision at the close · fill ${c.lag_sessions} session${c.lag_sessions === 1 ? "" : "s"} later</span></div>
+      <div class="scroll"><table><thead><tr><th>Decision</th><th>Fill</th><th>Trigger</th><th class="n">Group drift</th><th class="n">Turnover</th><th class="n">Cost</th><th class="n">Holdings</th><th>Note</th></tr></thead><tbody>
+      ${r.rebalances.map(e => `<tr><td class="mono">${e.decision}</td><td class="mono">${e.fill}</td>
+        <td>${e.trigger === "drift" ? '<span class="pill warn">drift</span>' : e.trigger === "calendar" ? '<span class="pill info">calendar</span>' : '<span class="pill off">inception</span>'}</td>
+        <td class="n">${e.drift === null ? "—" : pct(e.drift)}</td><td class="n">${pct(e.turnover, 1)}</td><td class="n">${(e.cost*1e4).toFixed(1)} bps</td>
+        <td class="n"><span class="pill xs ${e.in_range ? "ok" : "warn"}">${e.holdings} ${e.in_range ? "in" : "OUTSIDE"} ${h.min}–${h.max}</span></td>
+        <td>${e.gone ? `<span class="err">no priced name: ${esc(e.gone)}</span>` : ""}</td></tr>`).join("")}
+      </tbody></table></div></section>
+    <section class="panel"><div class="panel-h"><h2>Holdings at the end</h2><span class="label">drifted weight on ${r.end} vs the target filled ${last ? last.fill : "—"}</span></div>
+      <div class="scroll"><table><thead><tr><th>Ticker</th><th>Group</th><th class="n">Weight</th><th class="n">Target</th><th class="n">Gap</th></tr></thead><tbody>
+      ${r.holdings_end.map(x => `<tr><td class="mono">${esc(x.t)}</td><td>${esc(x.group)}</td><td class="n">${pct(x.w)}</td><td class="n">${pct(x.target)}</td><td class="n ${tone(x.w - x.target)}">${spp(x.w - x.target)}</td></tr>`).join("")}
+      </tbody></table></div></section>
+    </div>`;
+  }
+
+  const mand = r && r.name === BT.name ? {reb:r.rebalance, h:r.holdings_range, cons:r.constraints, tac:r.tactical, anchor:r.anchor}
+    : summ?.statement ? {reb:summ.statement.rebalance, h:summ.statement.holdings, cons:summ.constraints_on.length ? summ.constraints_on.join(", ") : "off", tac:"see the Book step", anchor:summ.anchor} : null;
+  return `<div class="page">
+    <div class="head"><div><div class="crumbs">portfolio/${esc(BT.name)}/backtest_config.json</div><h1>Backtest</h1></div>
+      ${r ? `<span class="label">${r.start} → ${r.end} vs ${esc(r.benchmarks[BT.bench] ? BT.bench : r.benchmark)}</span>` : ""}</div>
+    <section class="panel"><div class="panel-b bt-ctl">
+      <div class="field"><label for="btName">Portfolio</label><select id="btName">${names.map(n => `<option value="${esc(n)}" ${n === BT.name ? "selected" : ""}>${esc(n)}</option>`).join("")}</select></div>
+      <div class="field"><label for="btStart">Start date</label>
+        <div class="inline"><input type="date" id="btStart" min="${ss[0]}" max="${ss.at(-1)}" value="${BT.start ?? ss[0]}" style="max-width:170px">
+          <div class="seg" role="group" aria-label="Start presets">${[["first","Earliest"],["q2","Q2"],["q3","Q3"],["m1","1M"]].map(([k, l]) => `<button type="button" data-preset="${k}">${l}</button>`).join("")}</div></div>
+        <span class="bt-snap">${snapped ? `first session ${snapped} · ${ss.length - ss.indexOf(snapped)} sessions to ${ss.at(-1)}` : "after the last session"}</span></div>
+      <div class="field"><label>Benchmark</label><div class="seg" role="group" aria-label="Benchmark">${codes.map(c => `<button type="button" data-bench="${esc(c)}" aria-pressed="${c === BT.bench}">${esc(c)}</button>`).join("") || '<span class="err">no benchmark in market.db</span>'}</div></div>
+      <div class="field"><button type="button" class="btn ${dirty ? "primary" : ""}" id="btRun" ${BT.running || !d ? "disabled" : ""}>${BT.running ? "Running..." : dirty ? "Run backtest" : "Up to date"}</button></div>
+    </div></section>
+    ${r && dirty && !BT.running ? `<div class="dirtybar"><span>Settings changed. Results below show the last run.</span><button class="btn sm primary" id="btRun2">Run backtest</button></div>` : ""}
+    ${BT.err ? `<p class="note bad" style="white-space:pre-wrap">FAIL  ${esc(BT.err)}</p>` : ""}
+    ${!r && !BT.err ? `<p class="note">${BT.running ? "Running the engine..." : "Pick a start date and benchmark, then Run backtest."}</p>` : ""}
+    ${results}
+    <div class="grid2">
+      <section class="panel"><div class="panel-h"><h2>Mandate</h2><span class="pill plain off">statement.json · constraints.json</span></div>
+        <div class="panel-b">${mand ? `<dl class="kv bt-mand">
+          <dt>Rebalance</dt><dd>${mand.reb.frequency ? `${FREQ[mand.reb.frequency]} (${mand.reb.frequency}), first session of the period` : "No calendar; inception and drift only"}</dd>
+          <dt>Drift threshold</dt><dd>${mand.reb.drift_threshold != null ? `${pct(mand.reb.drift_threshold, 1)} at group grain, ½ Σ |gap|` : "Off"}</dd>
+          <dt>Holdings range</dt><dd>${mand.h.min}–${mand.h.max}, flagged per rebalance</dd>
+          <dt>Constraints</dt><dd>${esc(mand.cons)}</dd>
+          <dt>Tactical overlay</dt><dd>${esc(mand.tac)}</dd>
+          <dt>Book</dt><dd>as of anchor ${esc(mand.anchor ?? "not forked")}</dd>
+        </dl><p class="note" style="margin-top:12px">Edit the mandate in the portfolio's Statement step; the next run reads it.</p>` : '<p class="note warn">No statement.json; the backtest needs its rebalance mandate.</p>'}</div></section>
+      <section class="panel"><div class="panel-h"><h2>Backtest settings</h2><span class="mono" style="font-size:11.5px;color:var(--ink-3)">backtest_config.json</span></div>
+        ${BT.cfgErr ? `<p class="note bad" style="margin:12px 16px 0">${esc(BT.cfgErr)}. Showing defaults; Save replaces the file.</p>` : ""}
+        <div class="panel-b bt-cfg">
+          ${field("brokerage_bps", "Brokerage, bps per side", 1)}${field("sell_tax_bps", "Sell tax, bps", 1)}
+          ${field("lag_sessions", "Fill lag, sessions", 1, "0–5")}${field("risk_free_rate", "Risk-free rate, % a year", 0.1, "Sharpe only; applies without a run")}
+        </div>
+        <div class="panel-f"><span class="label" style="margin-right:auto">${cfgDirty ? "unsaved" : "saved"}</span>
+          <button class="btn" id="btReset" ${cfgDirty ? "" : "disabled"}>Revert</button>
+          <button class="btn primary" id="btSave" ${cfgDirty ? "" : "disabled"}>Save settings</button></div>
+        ${consoleBox("bt")}
+      </section>
+    </div>
+    <section class="panel"><div class="panel-h"><h2>Read before trusting the numbers</h2></div><div class="panel-b">
+      <ul class="bt-caveats">
+        <li><b>Return basis differs.</b> The portfolio is total return on adjusted prices, cash dividends reinvested on the ex-date. The benchmarks are price indexes, so the portfolio leads them by roughly the dividend yield before any skill.</li>
+        <li><b>Today's book, held backwards.</b> Group map, ratings, deleted and invalidated names are as of the anchor and apply to every past date: survivorship and look-ahead bias flatter every level. Read excess and spreads first.</li>
+        <li><b>Rebalances follow the mandate.</b> A scheduled rebalance re-derives budgets from that session's free float × official close and re-solves the constraints; a drift rebalance restores the last target.</li>
+        <li><b>Cash until the first fill.</b> The benchmark counts from the start close; the portfolio buys at the close after the fill lag.</li>
+      </ul></div></section>
+  </div>`;
+}
+function bindBacktest(){
+  if (!$("#btName")) return;
+  $("#btName").onchange = e => { btLoad(e.target.value); };
+  $("#btStart").onchange = e => { BT.start = e.target.value || null; render(); };
+  $$("[data-preset]").forEach(b => b.onclick = () => {
+    const ss = S.state.sessions, y = ss.at(-1).slice(0, 4);
+    const m1 = new Date(ss.at(-1) + "T00:00:00Z"); m1.setUTCMonth(m1.getUTCMonth() - 1);
+    BT.start = {first:null, q2:`${y}-04-01`, q3:`${y}-07-01`, m1:m1.toISOString().slice(0, 10)}[b.dataset.preset];
+    render();
+  });
+  $$("[data-bench]").forEach(b => b.onclick = () => { BT.bench = b.dataset.bench; render(); });
+  $$("[data-cfg]").forEach(i => i.onchange = () => {
+    const k = i.dataset.cfg; let v = parseFloat(i.value);
+    if (!isFinite(v) || v < 0){ render(); return; }
+    if (k === "lag_sessions") v = Math.min(5, Math.round(v));
+    if (k === "risk_free_rate") v = Math.min(0.99, v / 100);
+    BT.draft[k] = v; render();
+  });
+  $$("[data-cfg]").forEach(i => i.onkeydown = e => { if (e.key === "Enter"){ i.onchange(); if (i.dataset.cfg !== "risk_free_rate") btRun(); } });
+  $("#btStart").onkeydown = e => { if (e.key === "Enter") btRun(); };
+  ["#btRun", "#btRun2"].forEach(s => { if ($(s)) $(s).onclick = btRun; });
+  if ($("#btReset")) $("#btReset").onclick = () => { BT.draft = {...BT.saved}; render(); };
+  if ($("#btSave")) $("#btSave").onclick = () => action("bt", "PUT", `/api/p/${encodeURIComponent(BT.name)}/backtest_config`,
+    {config:BT.draft, version:BT.version}, async res => { if (res.ok){ BT.saved = {...BT.draft}; BT.version = res.version; BT.cfgErr = null; } });
+  const svg = $("#btMain");
+  if (svg && BT.cur){
+    const move = ev => {
+      const c = BT.cur, rect = svg.getBoundingClientRect(), wrap = $("#btCw").getBoundingClientRect();
+      const vx = (ev.clientX - rect.left) / rect.width * 1000, n = c.P.length;
+      const i = Math.max(0, Math.min(n - 1, Math.round((vx - CM.l) / (1000 - CM.l - CM.r) * (n - 1))));
+      ["#xh", "#xh2"].forEach(s => { const l = $(s); l.setAttribute("x1", c.x(i)); l.setAttribute("x2", c.x(i)); l.setAttribute("visibility", "visible"); });
+      const tip = $("#btTip");
+      tip.innerHTML = `<b>${c.dates[i]}</b><span>Portfolio</span><span>${c.P[i].toFixed(2)}</span><span>${esc(c.code)}</span><span>${c.B[i].toFixed(2)}</span><span>Excess</span><span>${spct(c.E[i])}</span>`;
+      tip.hidden = false;
+      tip.style.left = Math.min(rect.left - wrap.left + c.x(i) / 1000 * rect.width + 12, wrap.width - tip.offsetWidth - 8) + "px";
+      tip.style.top = "14px";
+    };
+    const leave = () => { $("#btTip").hidden = true; ["#xh", "#xh2"].forEach(s => $(s).setAttribute("visibility", "hidden")); };
+    [svg, $("#btEx")].forEach(el => { el.onmousemove = move; el.onmouseleave = leave; });
+  }
+}
+
 /* ---------- render ---------- */
 function render(){
   /* keep focus, caret and scroll in a text field across re-renders */
@@ -789,6 +1045,7 @@ function render(){
   if (S.page === "data"){ m.innerHTML = renderData(); bindData(); }
   else if (S.page === "list"){ m.innerHTML = renderList(); bindList(); }
   else if (S.page === "new"){ m.innerHTML = renderNew(); bindNew(); }
+  else if (S.page === "backtest"){ m.innerHTML = renderBacktest(); bindBacktest(); }
   else { m.innerHTML = renderFlow(); bindFlow(); }
   m.classList.toggle("busy", S.busy);
   if (keep){

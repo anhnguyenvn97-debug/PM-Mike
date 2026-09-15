@@ -4,11 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Architecture
 
-One market input, one database. FiinPro Portal exports are downloaded by hand into `data/fiinpro/` and **scripts own every derived write**. There is no MCP or agent step in the data path. Never hand-edit generated artifacts; fix the input and re-run.
+One market input, one database. FiinPro Portal exports are downloaded by hand into `data/fiinpro/` (stock exports and benchmark index exports side by side, told apart by header; both land in `data/market.db`) and **scripts own every derived write**. There is no MCP or agent step in the data path. Never hand-edit generated artifacts; fix the input and re-run.
 
 Pipeline: `ingest` (→ `data/market.db`) → `params` (→ `data/params/<anchor>.csv`) → `baseline` (→ `portfolio/baseline/<anchor>/`) → `portfolio new` → `portfolio fork --anchor` → `portfolio screen` (optional; suggests, `--invalidate` acts) → edit the book and tactical overlay → `constraints.json` → `target`.
 
 Each portfolio sits on its own anchor (`input/forked_from.txt`). `portfolio/baseline/` root holds a sticky copy of the `index/anchor_date.json` anchor, kept only because `backtest.py` reads it.
+
+`backtest_engine.py` is the backtest: it replays a portfolio under its own `statement.json` rebalance mandate, book and `constraints.json` (weights from `target.py`'s functions on each rebalance session) on `data/market.db`, against a benchmark from `index_prices`. Trading assumptions live in `portfolio/<name>/backtest_config.json` (desk-owned, saved from the Backtest tab); `run()` writes nothing and backs the desk's Backtest tab, the CLI writes `portfolio/<name>/backtest_engine/`.
 
 `backtest.py` is legacy and frozen: it still replays `data/local_history.db`, built by `load_history.py` from `data/fiinpro/archive/`, and reads the root baseline and `sector_cap.json`. Do not change its behaviour. `target.py` never reads `sector_cap.json`.
 

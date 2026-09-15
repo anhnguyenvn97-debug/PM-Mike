@@ -1,6 +1,6 @@
 market.db - data dictionary
-generated 2026-09-14 18:06:02 by scr/ingest.py (do not edit)
-size 3.2 MB
+generated 2026-09-15 10:41:23 by scr/ingest.py (do not edit)
+size 3.7 MB
 
 STATE
   prices   16,900 rows | 100 tickers | 169 sessions | 2026-01-05 -> 2026-09-11
@@ -25,9 +25,22 @@ SCHEMA  prices (PK trade_date, ticker) - VND, share counts unadjusted
   free_float         BIGINT   share count, time-varying
   market_cap         DOUBLE   vendor field, QA only
 
+SCHEMA  index_prices (PK trade_date, code) - benchmark indexes
+  trade_date         DATE     
+  code               VARCHAR  VNINDEX, VN30, VN100, ...
+  close              DOUBLE   close level, points; PRICE index (no dividends)
+  volume             BIGINT   QA only
+  value              DOUBLE   QA only
+
 SCHEMA  tickers (ticker PK, company_name)
 SCHEMA  loads   (file_name, sha256, row_count, dropped, date_min,
-                 date_max, ticker_count, loaded_at)
+                 date_max, ticker_count, loaded_at, kind)
+  kind stock|index; ticker_count counts index codes for an index drop
+
+BENCHMARKS  index_prices
+  VN100      170 sessions  2026-01-05 -> 2026-09-14
+  VN30       170 sessions  2026-01-05 -> 2026-09-14
+  VNINDEX    170 sessions  2026-01-05 -> 2026-09-14
 
 VIEW  prices_v = prices + exchange from ceiling band
   <8.5% HOSE | <12.5% HNX | <17.5% UPCOM | else NULL (listing day)
@@ -41,7 +54,9 @@ COVERAGE  shortest histories
   BID     169 sessions  2026-01-05 -> 2026-09-11
 
 BUILD  drops in this rebuild
-  VN100 data.xlsx
+  Benchmarks.xlsx  (index)
+      510 rows | 0 dropped | 3 indexes | 2026-01-05 -> 2026-09-14
+  VN100 data.xlsx  (stock)
       16,900 rows | 100 dropped | 100 tickers | 2026-01-05 -> 2026-09-11
 
 QUALITY  vendor market_cap vs close_raw * outstanding_shares

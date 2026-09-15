@@ -51,6 +51,8 @@ portfolio/baseline/*.csv         derived  sticky copy for backtest.py
 portfolio/<name>/input/          derived  scr/portfolio.py fork
 portfolio/<name>/screen/         derived  scr/portfolio.py screen
 portfolio/<name>/target/         derived  scr/target.py
+portfolio/<name>/backtest_config.json  hand/desk  backtest costs, lag, risk-free rate
+portfolio/<name>/backtest_engine/  derived  scr/backtest_engine.py
 portfolio/<name>/backtest/       derived  scr/backtest.py (legacy, untouched)
 ```
 
@@ -155,10 +157,39 @@ portfolio/<name>/backtest/       derived  scr/backtest.py (legacy, untouched)
 - [x] Tests 62 -> 63; ruff clean. `CLAUDE.md`: portfolio files are desk-owned.
 - [ ] Not browser-tested: Save and build, Reload after a conflict (API-tested).
 
+## Step 9 — Benchmarks in market.db  [DONE 2026-09-15]
+
+- [x] `ingest.py` loads index drops (`Index/Sector` header) into `index_prices`
+      beside stock drops; calendar check vs stock sessions (D24, D25).
+- [x] Data tab: kind per load, Benchmarks table, price-return note.
+- [x] Tests 63 -> 71; ruff clean; live rebuild, stock rows unchanged.
+- [ ] Not browser-tested: the Data tab render (API-tested).
+
+## Step 10 — Backtest engine, mockup first
+
+- [x] Engine spec: total return on `close_adj` (D24), benchmark chosen from
+      `index_prices` (VNINDEX / VN30 / VN100), price-return gap labelled.
+      Follows the mandate (D26), fixed invalid.csv (D27), per-portfolio
+      backtest JSON for costs / lag / fill / risk-free rate (D28), chart =
+      portfolio vs benchmark (D29).
+- [x] Mockup `docs/backtest_mockup.html` (real data, engine in-page; JS =
+      Python prototype to 2e-16). Artifact publish was blocked by permission.
+- [x] User approval of the mockup and engine logic (2026-09-15).
+- [x] Risk-free rate default 6%.
+- [x] `scr/backtest_engine.py` + `backtest_config.json` grammar in `common.py`;
+      tests 71 -> 89; live parity with the prototype 1e-8.
+- [x] Backtest tab in the desk app: `/api/p/<name>/backtest` (run, no writes),
+      `/backtest_config` (save, version-checked); tests 89 -> 91;
+      browser-checked on a test desk (run, stale bar, benchmark and rf switch).
+- [ ] Not browser-tested: Save settings, Revert, a FAIL result.
+- [ ] Stock history in `market.db` starts 2026-01-05; a 2025 window needs a
+      2025 stock drop (and index history to match).
+
 ## Later (not scheduled)
 
 - FOL: fill `index/fol.csv`, add a `fol` screen to `common.SCREENS` (D14).
 - Rebalance stage consuming `statement.json` mandate; drift = ½ Σ |gap| at
   group grain (D7).
-- Backtester revision: read `market.db` and the statement mandate.
-- Benchmark curve, survivorship bias, sizing/execution (see `HANDOFF.md` §8).
+- Survivorship bias, sizing/execution (see `HANDOFF.md` §8).
+- Backtest tab: selector to overlay other portfolios' backtests for
+  cross-comparison (D29).

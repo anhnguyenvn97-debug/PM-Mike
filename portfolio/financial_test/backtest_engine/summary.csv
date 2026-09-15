@@ -1,0 +1,2 @@
+portfolio,benchmark,start,end,sessions,cfg_brokerage_bps,cfg_sell_tax_bps,cfg_lag_sessions,cfg_risk_free_rate,p_total,p_annualised,p_vol,p_sharpe,p_max_drawdown,b_total,b_annualised,b_vol,b_sharpe,b_max_drawdown,excess,tracking_error,information_ratio,beta,turnover,cost,n_calendar,n_drift
+financial_test,VN30,2026-04-01,2026-09-11,112,10.00000000,10.00000000,1,0.06000000,0.00457948,0.01042691,0.21446223,-0.23115068,-0.15569212,0.04020217,0.09360863,0.16697557,0.20127870,-0.13111442,-0.03562269,0.12173583,-0.68329691,1.05906557,0.06966135,0.00120898,5,0

@@ -1,0 +1,12 @@
+portfolio:   financial_test, book as of anchor 2026-09-11
+window:      2026-04-01 -> 2026-09-11 (112 sessions)
+benchmark:   VN30, PRICE index rebased to the start close
+mandate:     rebalance 1M; drift 8.00% group grain; holdings 5-10
+constraints: stock 20.00% (3 at max)
+tactical:    off
+config:      defaults (no backtest_config.json): lag 1, brokerage 10 bps a side, sell tax 10 bps, risk-free 6.00%
+returns:     total return on close_adj; benchmark is price return, so
+             the portfolio leads it by roughly the dividend yield
+bias:        today's group map and book held backwards (survivorship,
+             look-ahead); read excess and spreads before levels
+built_at:    2026-09-15 11:38

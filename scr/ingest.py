@@ -11,10 +11,28 @@ REBUILT FROM SCRATCH on every run from whatever sits in data/fiinpro/. The
 build lands in a temp file and is swapped in only if every drop validates, so
 a bad drop cannot destroy a good database.
 
+Two kinds of drop sit side by side in data/fiinpro/, told apart by header:
+
+    stock   "Ticker" column          -> prices, tickers
+    index   "Index/Sector" column    -> index_prices (benchmarks)
+
+Anything else FAILs. Index drops are FiinPro "Index & Sector" trading data:
+code, date, close level, volume, value ("Level" is dropped). The close is a
+PRICE index: dividends are not reinvested, so a total-return backtest on
+close_adj leads it by roughly the dividend yield. That gap is labelled, not
+corrected.
+
 Banner and footer rows are tolerated: the header is the first row whose first
-cell is "No", and rows without a ticker or a parseable date are dropped.
-Rows with no close price are non-sessions (pre-listing padding, suspension, or
-a date that has not traded yet) and are dropped and counted.
+cell is "No", and rows without a ticker (code) or a parseable date are
+dropped. Rows with no close are non-sessions (pre-listing padding, suspension,
+or a date that has not traded yet) and are dropped and counted.
+
+Index dates are checked against the stock sessions once every drop is loaded:
+an index date inside the stock date range that is not a stock session FAILs
+(a wrong calendar); an index date past the last stock session (the index
+export was pulled after a close the stock export missed) and a stock session a
+benchmark lacks are WARNs. Coverage is enforced by whatever consumes a
+benchmark, not here. With no stock drop loaded the check is skipped.
 
 Sector and FOL are NOT stored. They are hand-edited files (index/) and are
 joined by scr/params.py at build time, so editing them never needs a re-ingest.
@@ -75,6 +93,16 @@ SCHEMA = [("trade_date", "DATE"), ("ticker", "VARCHAR")] + \
 # Ceiling band is the only exchange marker FiinPro ships, and it is correct per
 # session (a transfer between exchanges shows up on the day it happens).
 # Listing days widen to +-20% and resolve to NULL.
+INDEX_COLUMNS = {
+    "Index/Sector": "code",
+    "Date": "trade_date",
+    "Close Index (D)": "close",
+    "Total Trading Volume (D)": "volume",
+    "Total Trading Value (D)": "value",
+}
+INDEX_SCHEMA = [("trade_date", "DATE"), ("code", "VARCHAR"), ("close", "DOUBLE"),
+                ("volume", "BIGINT"), ("value", "DOUBLE")]
+
 EXCHANGE_CASE = """CASE
         WHEN reference IS NULL OR reference = 0 THEN NULL
         WHEN ceiling / reference - 1 < 0.085 THEN 'HOSE'
@@ -83,8 +111,8 @@ EXCHANGE_CASE = """CASE
     END"""
 
 
-def read_drop(path: Path) -> tuple[pd.DataFrame, int]:
-    """Load one FiinPro export, normalised to SCHEMA. Returns (rows, dropped)."""
+def read_table(path: Path) -> pd.DataFrame:
+    """The rows under the header ("No" in the first cell), headers unit-stripped."""
     if path.suffix.lower() in (".xlsx", ".xls"):
         raw = pd.read_excel(path, header=None)
     else:
@@ -98,24 +126,44 @@ def read_drop(path: Path) -> tuple[pd.DataFrame, int]:
 
     df = raw.iloc[h + 1:].copy()
     df.columns = [str(c).split("\n")[0].strip() for c in raw.iloc[h]]
-    missing = [c for c in COLUMNS if c not in df.columns]
+    return df
+
+
+def normalise(df: pd.DataFrame, columns: dict, schema: list, key: str,
+              close: str, what: str) -> tuple[pd.DataFrame, int]:
+    """Rename, drop footer and non-session rows, type. Returns (rows, dropped)."""
+    missing = [c for c in columns if c not in df.columns]
     if missing:
         shown = ", ".join(missing[:3])
         more = f" (+{len(missing) - 3} more)" if len(missing) > 3 else ""
-        raise ValueError(f"not a FiinPro price export -- missing {shown}{more}")
+        raise ValueError(f"not a FiinPro {what} export -- missing {shown}{more}")
 
-    df = df[list(COLUMNS)].rename(columns=COLUMNS)
+    df = df[list(columns)].rename(columns=columns)
     df["trade_date"] = pd.to_datetime(df["trade_date"], errors="coerce")
-    df = df[df["ticker"].notna() & df["trade_date"].notna()].copy()  # footer
+    df = df[df[key].notna() & df["trade_date"].notna()].copy()  # footer
     df["trade_date"] = df["trade_date"].dt.date
-    df["ticker"] = df["ticker"].astype(str).str.strip().str.upper()
+    df[key] = df[key].astype(str).str.strip().str.upper()
 
-    for c, typ in SCHEMA:
+    for c, typ in schema:
         if typ in ("DOUBLE", "BIGINT"):
             df[c] = pd.to_numeric(df[c])
 
-    blank = df["close_raw"].isna()
+    blank = df[close].isna()
     return df[~blank].reset_index(drop=True), int(blank.sum())
+
+
+def read_drop(path: Path) -> tuple[str, pd.DataFrame, int]:
+    """Load one FiinPro export. Returns (kind, rows, dropped); kind is
+    "stock" (normalised to SCHEMA) or "index" (to INDEX_SCHEMA)."""
+    df = read_table(path)
+    if "Index/Sector" in df.columns:
+        return ("index", *normalise(df, INDEX_COLUMNS, INDEX_SCHEMA, "code",
+                                    "close", "index"))
+    if "Ticker" in df.columns:
+        return ("stock", *normalise(df, COLUMNS, SCHEMA, "ticker",
+                                    "close_raw", "price"))
+    raise ValueError("neither a stock export (no 'Ticker' column) nor an "
+                     "index export (no 'Index/Sector' column)")
 
 
 def validate(df: pd.DataFrame) -> tuple[list[str], list[str]]:
@@ -160,57 +208,112 @@ def validate(df: pd.DataFrame) -> tuple[list[str], list[str]]:
     return errs, warns
 
 
+def validate_index(df: pd.DataFrame) -> tuple[list[str], list[str]]:
+    """Return (errors, warnings) for an index drop. Volume and value are QA
+    columns and may be blank; the close may not be zero or negative."""
+    errs = []
+    dup = df.duplicated(["trade_date", "code"], keep=False)
+    if dup.any():
+        pairs = df.loc[dup, ["code", "trade_date"]].head(5).values.tolist()
+        errs.append(f"{dup.sum()} duplicate (date,code) rows, e.g. {pairs}")
+    bad = df.loc[df["close"] <= 0, "code"]
+    if len(bad):
+        errs.append(f"close <= 0: {sorted(set(bad))[:8]}")
+    if (df["volume"] < 0).any() or (df["value"] < 0).any():
+        errs.append("negative volume or value")
+    return errs, []
+
+
+def check_calendar(con: duckdb.DuckDBPyConnection) -> tuple[list[str], list[str]]:
+    """Index dates against stock sessions (see module docstring)."""
+    lo, hi = con.execute("SELECT min(trade_date), max(trade_date) FROM prices").fetchone()
+    if lo is None:
+        return [], []
+    errs, warns = [], []
+    off = con.execute(
+        "SELECT DISTINCT trade_date FROM index_prices WHERE trade_date BETWEEN ? AND ? "
+        "AND trade_date NOT IN (SELECT trade_date FROM prices) ORDER BY 1",
+        [lo, hi]).fetchall()
+    if off:
+        errs.append(f"{len(off)} index date(s) inside the stock range are not stock "
+                    f"sessions, e.g. {[str(r[0]) for r in off[:5]]}")
+    for code, late in con.execute(
+            "SELECT code, count(*) FROM index_prices WHERE trade_date > ? "
+            "GROUP BY 1 ORDER BY 1", [hi]).fetchall():
+        warns.append(f"{code}: {late} session(s) after the last stock session {hi}")
+    for code, gap, first, last in con.execute(
+            "SELECT c.code, count(*), min(s.trade_date), max(s.trade_date) "
+            "FROM (SELECT DISTINCT code FROM index_prices) c "
+            "CROSS JOIN (SELECT DISTINCT trade_date FROM prices) s "
+            "ANTI JOIN index_prices i ON i.code = c.code AND i.trade_date = s.trade_date "
+            "GROUP BY 1 ORDER BY 1").fetchall():
+        warns.append(f"{code}: missing {gap} stock session(s), {first} -> {last}")
+    return errs, warns
+
+
 def create_schema(con: duckdb.DuckDBPyConnection) -> None:
     cols = ", ".join(f"{n} {t}" for n, t in SCHEMA)
     con.execute(f"CREATE TABLE prices ({cols}, PRIMARY KEY (trade_date, ticker))")
     con.execute("CREATE TABLE tickers "
                 "(ticker VARCHAR PRIMARY KEY, company_name VARCHAR)")
+    icols = ", ".join(f"{n} {t}" for n, t in INDEX_SCHEMA)
+    con.execute(f"CREATE TABLE index_prices ({icols}, PRIMARY KEY (trade_date, code))")
     con.execute("CREATE TABLE loads (file_name VARCHAR, sha256 VARCHAR, "
                 "row_count BIGINT, dropped BIGINT, date_min DATE, date_max DATE, "
-                "ticker_count INTEGER, loaded_at TIMESTAMP)")
+                "ticker_count INTEGER, loaded_at TIMESTAMP, kind VARCHAR)")
     con.execute(f"CREATE VIEW prices_v AS "
                 f"SELECT *, {EXCHANGE_CASE} AS exchange FROM prices")
 
 
-def load_drop(con: duckdb.DuckDBPyConnection, path: Path) -> int:
-    df, dropped = read_drop(path)
-    errs, warns = validate(df)
+def report(name: str, errs: list[str], warns: list[str]) -> int:
     for w in warns:
-        print(f"WARN  {path.name}: {w}")
+        print(f"WARN  {name}: {w}")
     if errs:
-        print(f"FAIL  {path.name}: {len(errs)} check(s) failed")
+        print(f"FAIL  {name}: {len(errs)} check(s) failed")
         for e in errs:
             print(f"  - {e}")
         return 1
+    return 0
 
-    prices = df[[n for n, _ in SCHEMA]]
-    con.register("new_rows", prices)
-    clash = con.execute("SELECT count(*) FROM prices JOIN new_rows "
-                        "USING (trade_date, ticker)").fetchone()[0]
+
+def load_drop(con: duckdb.DuckDBPyConnection, path: Path) -> int:
+    kind, df, dropped = read_drop(path)
+    stock = kind == "stock"
+    table, key, schema = (("prices", "ticker", SCHEMA) if stock
+                          else ("index_prices", "code", INDEX_SCHEMA))
+    if report(path.name, *(validate(df) if stock else validate_index(df))):
+        return 1
+
+    rows = df[[n for n, _ in schema]]
+    con.register("new_rows", rows)
+    clash = con.execute(f"SELECT count(*) FROM {table} JOIN new_rows "
+                        f"USING (trade_date, {key})").fetchone()[0]
     if clash:
         # Two drops covering the same session can carry different adjustment
         # states. Refuse rather than pick one silently.
         con.unregister("new_rows")
-        print(f"FAIL  {path.name}: {clash:,} (date,ticker) rows already loaded "
+        print(f"FAIL  {path.name}: {clash:,} (date,{key}) rows already loaded "
               f"from another drop -- remove or archive the overlap")
         return 1
 
-    con.execute("INSERT INTO prices SELECT * FROM new_rows")
-    con.register("new_names", df[["ticker", "company_name"]]
-                 .drop_duplicates("ticker"))
-    con.execute("INSERT OR REPLACE INTO tickers SELECT * FROM new_names")
+    con.execute(f"INSERT INTO {table} SELECT * FROM new_rows")
+    if stock:
+        con.register("new_names", df[["ticker", "company_name"]]
+                     .drop_duplicates("ticker"))
+        con.execute("INSERT OR REPLACE INTO tickers SELECT * FROM new_names")
+        con.unregister("new_names")
     con.execute(
         "INSERT INTO loads SELECT ?, ?, ?, ?, min(trade_date), max(trade_date), "
-        "count(DISTINCT ticker), now()::TIMESTAMP FROM new_rows",
+        f"count(DISTINCT {key}), now()::TIMESTAMP, ? FROM new_rows",
         [path.name, hashlib.sha256(path.read_bytes()).hexdigest(),
-         len(prices), dropped])
+         len(rows), dropped, kind])
     con.unregister("new_rows")
-    con.unregister("new_names")
 
-    print(f"OK    {path.name}: {len(prices):,} rows "
+    names = "tickers" if stock else f"indexes {sorted(rows['code'].unique())}"
+    print(f"OK    {path.name}: {kind}, {len(rows):,} rows "
           f"({dropped:,} non-session dropped), "
-          f"{prices['ticker'].nunique()} tickers, "
-          f"{prices['trade_date'].min()} -> {prices['trade_date'].max()}")
+          f"{rows[key].nunique()} {names}, "
+          f"{rows['trade_date'].min()} -> {rows['trade_date'].max()}")
     return 0
 
 
@@ -239,9 +342,23 @@ def write_dictionary(con: duckdb.DuckDBPyConnection, db: Path, out: Path) -> Non
     }
     for name, typ in SCHEMA:
         L.append(f"  {name:<19}{typ:<9}{notes.get(name, '')}")
-    L += ["", "SCHEMA  tickers (ticker PK, company_name)",
+    L += ["", "SCHEMA  index_prices (PK trade_date, code) - benchmark indexes",
+          "  trade_date         DATE     ",
+          "  code               VARCHAR  VNINDEX, VN30, VN100, ...",
+          "  close              DOUBLE   close level, points; PRICE index (no dividends)",
+          "  volume             BIGINT   QA only",
+          "  value              DOUBLE   QA only",
+          "", "SCHEMA  tickers (ticker PK, company_name)",
           "SCHEMA  loads   (file_name, sha256, row_count, dropped, date_min,",
-          "                 date_max, ticker_count, loaded_at)", ""]
+          "                 date_max, ticker_count, loaded_at, kind)",
+          "  kind stock|index; ticker_count counts index codes for an index drop", ""]
+
+    L += ["BENCHMARKS  index_prices"]
+    idx = con.execute(
+        "SELECT code, count(*), min(trade_date), max(trade_date) FROM index_prices "
+        "GROUP BY 1 ORDER BY 1").fetchall()
+    L += [f"  {c:<9}{k:>5} sessions  {a} -> {b}" for c, k, a, b in idx] or ["  none"]
+    L.append("")
 
     ex = con.execute("SELECT exchange, count(DISTINCT ticker) FROM prices_v "
                      f"WHERE trade_date = '{dmax}' GROUP BY 1 ORDER BY 2 DESC"
@@ -258,11 +375,12 @@ def write_dictionary(con: duckdb.DuckDBPyConnection, db: Path, out: Path) -> Non
     L.append("")
 
     L += ["BUILD  drops in this rebuild"]
-    for f, r, dr, a, b, tc in con.execute(
+    for f, r, dr, a, b, tc, kind in con.execute(
             "SELECT file_name, row_count, dropped, date_min, date_max, "
-            "ticker_count FROM loads ORDER BY file_name").fetchall():
-        L += [f"  {f}",
-              f"      {r:,} rows | {dr:,} dropped | {tc} tickers | {a} -> {b}"]
+            "ticker_count, kind FROM loads ORDER BY file_name").fetchall():
+        what = "tickers" if kind == "stock" else "indexes"
+        L += [f"  {f}  ({kind})",
+              f"      {r:,} rows | {dr:,} dropped | {tc} {what} | {a} -> {b}"]
     L.append("")
 
     bad = con.execute(
@@ -297,6 +415,8 @@ def build(files: list[Path], db: Path, dictionary: Path | None = None) -> int:
             except Exception as exc:  # noqa: BLE001 - any drop can be malformed
                 print(f"FAIL  {path.name}: {exc}")
                 rc = 1
+        if not rc:
+            rc = report("calendar", *check_calendar(con))
         con.execute("CHECKPOINT")
     finally:
         con.close()

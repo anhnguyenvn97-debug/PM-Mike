@@ -33,14 +33,31 @@ def make_rows(tickers=("AAA", "BBB"), sessions=25, start=date(2026, 1, 5)):
     return rows
 
 
+INDEX_HEADERS = [
+    "No", "Index/Sector", "Level", "Date", "Close Index (D)\nUnit: Point",
+    "Total Trading Volume (D)\nUnit: Shares", "Total Trading Value (D)\nUnit: VND",
+]
+
+
+def make_index_rows(codes=("VNINDEX", "VN30"), sessions=25, start=date(2026, 1, 5)):
+    """Synthetic FiinPro index rows on the same calendar as make_rows."""
+    rows, n = [], 0
+    for i in range(sessions):
+        d = start + timedelta(days=i)
+        for c in codes:
+            n += 1
+            rows.append([n, c, 4, d, 1000 + i, 5_000_000, 1e11])
+    return rows
+
+
 @pytest.fixture
 def drop(tmp_path):
     """Write a drop with a banner and footer, like a raw portal export."""
-    def _write(rows, name="drop.xlsx"):
-        banner = [[None] * len(HEADERS) for _ in range(3)]
+    def _write(rows, name="drop.xlsx", headers=HEADERS):
+        banner = [[None] * len(headers) for _ in range(3)]
         banner[1][0] = "Data Title"
-        footer = [["Website: fiinpro"] + [None] * (len(HEADERS) - 1)]
-        pd.DataFrame(banner + [HEADERS] + rows + footer).to_excel(
+        footer = [["Website: fiinpro"] + [None] * (len(headers) - 1)]
+        pd.DataFrame(banner + [headers] + rows + footer).to_excel(
             tmp_path / name, header=False, index=False)
         return tmp_path / name
     return _write

@@ -5,8 +5,8 @@
     "max": 10
   },
   "rebalance": {
-    "frequency": "1Q",
-    "drift_threshold": null
+    "frequency": "1M",
+    "drift_threshold": 0.08
   },
   "scope": "NA",
   "screens": {
