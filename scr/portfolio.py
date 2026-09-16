@@ -7,8 +7,7 @@ Layout of a portfolio:
         constraints.json                HAND (or UI) -- see common.py
         sector_constituents_custom.csv  HAND (or UI) -- the book
         tactical_group.json/.csv        HAND (or UI), optional
-        sector_cap.json                 LEGACY, read only by scr/backtest.py
-        input/                          derived by fork, never edit
+        input/                         derived by fork, never edit
             sector_constituents.csv     verbatim baseline grid of the anchor
             forked_from.txt             provenance; anchor_date is binding
         screen/
@@ -18,8 +17,9 @@ Layout of a portfolio:
 
 The book is the investable universe. A ticker present in its group column is
 investable; a blank is not. A group whose column is empty must be rated NO:
-every command here that can empty a column sets it to NO and WARNs (the UI
-does the same). target.py FAILs on a hand-edited book that breaks the rule.
+every command here that can empty a column sets it to NO with 0 active pp and
+WARNs (the UI does the same). target.py FAILs on a hand-edited book that breaks
+the rule, and on the active pp that no longer net to zero.
 
 new <name>
     Create the folder, a default statement.json and constraints.json (all off).
@@ -28,26 +28,31 @@ new <name>
 
 fork <name> [--anchor YYYY-MM-DD]
     Snapshot portfolio/baseline/<anchor>/ into input/ and (re)build the book.
-    Default anchor: the sticky copy's (index/anchor_date.json). An anchor
-    whose params or baseline is missing or stale is built on demand
-    (baseline.ensure). Any session in market.db is accepted; one with fewer
-    than 21 sessions behind it has no turnover, so its turnover screen fails
-    every name.
-    First fork: the book is a copy of the baseline grid, all AV.
+    Default anchor: the sticky anchor (index/anchor_date.json, see
+    baseline.sticky_anchor). An anchor whose params or baseline is missing or
+    stale is built on demand (baseline.ensure). Any session in market.db is
+    accepted; one with fewer than 21 sessions behind it has no turnover, so its
+    turnover screen fails every name.
+    First fork: the book is a copy of the baseline grid, all AV at 0 pp.
     Re-fork: the old book is carried across BY GROUP NAME, never by position:
-        rows 0-1   rating and multiplier of every group that still exists
+        rows 0-1   rating and active pp of every group that still exists
         deletions  names that were in the old input/ column but blank in the
                    old book stay out; names new to the baseline come in live,
                    because nobody has decided on them yet
-    Groups that disappeared are reported with the rating they lose. Groups that
+    Groups that disappeared are reported with the rating they lose; their pp
+    leave the net, so target.py FAILs until the book is rebalanced. Groups that
     appeared come in AV. Invalidated names are always kept out. Without an old
     input/ grid, deletions cannot be told apart from names that were never
     there, so only ratings carry and a WARN says so.
 
 screen <name> [--invalidate T [T ...] | --invalidate-all] [--restore T [T ...]]
     Evaluate the statement's screens against data/params/<portfolio anchor>.csv
-    for every name still investable and write screen/exclusions.csv:
-        ticker, group, screen, value, threshold
+    for every name in the anchor universe (input/sector_constituents.csv) that
+    is not already invalidated, and write screen/exclusions.csv:
+        ticker, group, screen, value, threshold, in_book
+    in_book is yes for a name the book still holds and no for one deleted in
+    the Book step: the second kind is a name to leave out rather than one to
+    act on, and it is listed so a curated book cannot hide it.
     Screens only suggest. --invalidate moves named tickers (they must be on the
     current suggestion list) into screen/invalid.csv and out of the book;
     --invalidate-all takes every one. An invalidated name stays in the baseline
@@ -100,8 +105,8 @@ from common import (
 )
 
 NAME = re.compile(r"^[a-z0-9_]+$")
-EXCL = ["ticker", "group", "screen", "value", "threshold"]
-INVALID_COLS = EXCL + ["invalidated_at"]
+EXCL = ["ticker", "group", "screen", "value", "threshold", "in_book"]
+INVALID_COLS = ["ticker", "group", "screen", "value", "threshold", "invalidated_at"]
 
 
 def new(name: str, portfolio: Path = PORTFOLIO,
@@ -127,7 +132,7 @@ def auto_no(header: list[list[str]], cols: list[list[str]]) -> list[str]:
     flipped = []
     for j, g in enumerate(header[2]):
         if not cols[j] and header[1][j] != "NO":
-            header[0][j] = header[1][j] = "NO"
+            header[0][j], header[1][j] = "0", "NO"
             flipped.append(g)
     return flipped
 
@@ -139,7 +144,7 @@ def carry(base: list[list[str]], old_book: list[list[str]] | None,
     report = {"carried": [], "appeared": [], "lost": {}, "deleted": {},
               "deletions_known": old_input is not None}
     if old_book is None:
-        return ([["AV"] * len(groups), ["AV"] * len(groups), list(groups)],
+        return ([["0"] * len(groups), ["AV"] * len(groups), list(groups)],
                 [grid_column(base, j) for j in range(len(groups))], report)
 
     if len(old_book) < 3:
@@ -156,7 +161,7 @@ def carry(base: list[list[str]], old_book: list[list[str]] | None,
         fresh = grid_column(base, j)
         if g in old_at:
             k = old_at[g]
-            row0.append(cell(0, k) or "AV")
+            row0.append(cell(0, k) or "0")
             row1.append(cell(1, k) or "AV")
             report["carried"].append(g)
             if g in in_at:
@@ -167,13 +172,13 @@ def carry(base: list[list[str]], old_book: list[list[str]] | None,
                     report["deleted"][g] = kept_out
                 fresh = [t for t in fresh if t not in gone]
         else:
-            row0.append("AV")
+            row0.append("0")
             row1.append("AV")
             report["appeared"].append(g)
         cols.append(fresh)
     for g in old_groups:
         if g not in groups:
-            report["lost"][g] = f"{cell(1, old_at[g])} (mult {cell(0, old_at[g])})"
+            report["lost"][g] = f"{cell(1, old_at[g])} ({cell(0, old_at[g]) or '0'} pp)"
     return [row0, row1, list(groups)], cols, report
 
 
@@ -185,7 +190,9 @@ def fork(name: str, anchor: str | None = None, portfolio: Path = PORTFOLIO,
         raise BookError(f"no such portfolio: {home}\n"
                         f"      run scr/portfolio.py new {name}")
     if anchor is None:
-        anchor = baseline.sticky_anchor(root)
+        if db is None:
+            raise BookError("no anchor given and no database to resolve the sticky one")
+        anchor = baseline.sticky_anchor(db)
     try:
         anchor = date.fromisoformat(str(anchor)).isoformat()
     except ValueError:
@@ -228,7 +235,7 @@ def fork(name: str, anchor: str | None = None, portfolio: Path = PORTFOLIO,
     else:
         moved = f" (was {old_anchor})" if old_anchor and old_anchor != anchor else ""
         print(f"OK    re-forked {name} onto baseline {anchor}{moved}; {BOOK} rebuilt")
-        print(f"      ratings carried for {len(rep['carried'])} group(s)")
+        print(f"      ratings and active pp carried for {len(rep['carried'])} group(s)")
         for g, ts in rep["deleted"].items():
             print(f"      kept deleted  {g}: {ts}")
         if rep["appeared"]:
@@ -291,20 +298,30 @@ def screen(name: str, invalidate: list[str] | None = None,
 
     book = read_grid(book_p)
     live = {t: g for j, g in enumerate(book[2]) for t in grid_column(book, j)}
+    base_p = home / "input" / GRID
+    universe = dict(live)
+    if base_p.exists():
+        base = read_grid(base_p)
+        universe = {t: g for j, g in enumerate(base[2])
+                    for t in grid_column(base, j)} | live
+    out_already = {r["ticker"] for r in inv_rows}
 
     sc = statement.get("screens", {})
     rows = []
     t_cfg, f_cfg = sc.get("turnover", {}), sc.get("float_cap", {})
-    for t, g in sorted(live.items()):
+    for t, g in sorted(universe.items()):
+        if t in out_already or t not in params.index:
+            continue
+        held = "yes" if t in live else "no"
         if t_cfg.get("on"):
             v = params.at[t, "turnover_21_pct"]
             if pd.isna(v) or v < t_cfg["min_pct"]:
                 rows.append([t, g, "turnover", None if pd.isna(v) else v,
-                             t_cfg["min_pct"]])
+                             t_cfg["min_pct"], held])
         if f_cfg.get("on"):
             v = params.at[t, "float_cap"] / 1e9
             if v < f_cfg["min_bn_vnd"]:
-                rows.append([t, g, "float_cap", v, f_cfg["min_bn_vnd"]])
+                rows.append([t, g, "float_cap", v, f_cfg["min_bn_vnd"], held])
     excl = pd.DataFrame(rows, columns=EXCL)
 
     out = home / "screen"
@@ -312,13 +329,16 @@ def screen(name: str, invalidate: list[str] | None = None,
     excl.to_csv(out / "exclusions.csv", index=False, lineterminator="\n",
                 float_format="%.6g")
     on = [k for k in ("turnover", "float_cap") if sc.get(k, {}).get("on")]
+    in_book = excl[excl["in_book"] == "yes"]["ticker"].nunique()
     print(f"OK    {name}  anchor {anchor}  screens on: {on or 'none'}")
-    print(f"      {len(live)} investable names, {excl['ticker'].nunique()} "
-          f"suggested -> {out / 'exclusions.csv'}")
+    print(f"      {len(universe)} names screened, {len(live)} of them investable; "
+          f"{excl['ticker'].nunique()} suggested, {in_book} in the book "
+          f"-> {out / 'exclusions.csv'}")
     for r in excl.itertuples():
         val = "no 21-session history" if pd.isna(r.value) else f"{r.value:.4g}"
+        tail = "" if r.in_book == "yes" else "  (not in the book)"
         print(f"      {r.ticker:<6} {r.group:<26} {r.screen:<10} {val} "
-              f"< {r.threshold}")
+              f"< {r.threshold}{tail}")
 
     targets = sorted(set(excl["ticker"])) if invalidate_all else sorted(set(invalidate or []))
     if targets:
@@ -336,7 +356,10 @@ def screen(name: str, invalidate: list[str] | None = None,
         header = [list(book[0]), list(book[1]), list(book[2])]
         flipped = auto_no(header, cols)
         write_grid(book_p, header, cols)
+        outside = sorted(set(targets) - set(live))
         print(f"OK    invalidated {targets} -> {inv_p}; removed from {BOOK}")
+        if outside:
+            print(f"      already out of the book, now barred from returning: {outside}")
         for g in flipped:
             print(f"WARN  {g}: no investable name left, rated NO")
     return excl

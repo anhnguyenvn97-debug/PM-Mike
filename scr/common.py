@@ -10,7 +10,8 @@ statement.json -- one per portfolio, hand-edited (or written by the UI):
       "approach": "free text, discretionary reference only",
       "scope":    "free text, discretionary reference only",
       "holdings": {"min": 20, "max": 30},
-      "rebalance": {"frequency": "1Q", "drift_threshold": 0.08},
+      "rebalance": {"frequency": "1Q", "drift_threshold": 0.08,
+                    "breach_tolerance": 0.10},
       "screens": {
         "turnover":  {"on": false, "min_pct": 0.10},
         "float_cap": {"on": false, "min_bn_vnd": 1000}
@@ -20,28 +21,36 @@ statement.json -- one per portfolio, hand-edited (or written by the UI):
     holdings   integers, 1 <= min <= max. target.py WARNs outside the range.
     rebalance  frequency is "2W" | "1M" | "1Q" | null; drift_threshold is a
                FRACTION (0.08 = 8%) or null; at least one must be set. Drift is
-               half the sum of absolute weight gaps at group grain. Consumed by
-               the rebalance stage, not by any builder yet.
+               half the sum of absolute weight gaps at group grain.
+               breach_tolerance is a FRACTION or null: how far a constraints.json
+               cap may be broken before a rebalance is forced (0.10 = 10% of the
+               limit, so a 20% stock cap trips at 22%); null switches breach off
+               even with caps on. A missing key means 0.10. Consumed by the
+               rebalance stage, not by any builder yet.
     screens    turnover: average daily turnover over 21 sessions as % of float
                cap, params.turnover_21_pct. float_cap: params.float_cap in
                billions of VND. A screen that is off is never evaluated.
                FOL is deferred and not accepted yet.
 
 constraints.json -- one per portfolio, hand-edited (or written by the UI). A
-missing file means every constraint is off. All values are FRACTIONS of the book.
+missing file means every cap is off and the default active budget. Cap values
+are FRACTIONS of the book; the active budget is in PERCENTAGE POINTS.
 
     {
+      "active": {"budget_pp": 20},
       "sector": {"on": false, "max": 0.25, "per_group": {"Banks - Private": 0.30}},
       "stock":  {"on": false, "max": 0.10},
       "large":  {"on": false, "threshold": 0.05, "aggregate": 0.40}
     }
 
+    active  always on: half the sum of |active pp| over groups may not exceed
+            budget_pp, in (0, 100]. Missing block = 20.
     sector  cap on every live group's weight; per_group overrides max for the
             named groups, tactical groups included. Universal = empty per_group.
     stock   cap on every holding's weight.
     large   UCITS style: holdings above threshold may sum to at most aggregate.
             threshold <= aggregate.
-    The solver lives in target.py (apply_constraints); read its docstring.
+    The tilt and the solver live in target.py; read its docstring.
 
 backtest_config.json -- one per portfolio, written by the desk's Backtest tab
 (or by hand). Trading assumptions for scr/backtest_engine.py only; the
@@ -85,11 +94,9 @@ ANCHOR_CFG = INDEX / "anchor_date.json"
 GROUP_MAP = INDEX / "group_map_live.csv"
 PORTFOLIO = ROOT / "portfolio"
 
-# File names are shared with scr/backtest.py; do not rename.
 GRID = "sector_constituents.csv"
 ALLOC = "sector_allocation.csv"
 BOOK = "sector_constituents_custom.csv"
-CAP = "sector_cap.json"
 TAC = "tactical_group.csv"
 TAC_SWITCH = "tactical_group.json"
 STATEMENT = "statement.json"
@@ -99,7 +106,9 @@ INVALID = "invalid.csv"            # under portfolio/<name>/screen/
 FORKED = "forked_from.txt"         # under portfolio/<name>/input/
 
 FREQUENCIES = ("2W", "1M", "1Q")
+BREACH_TOL = 0.10                  # statement.json rebalance.breach_tolerance default
 SCREENS = {"turnover": "min_pct", "float_cap": "min_bn_vnd"}
+CAPS = ("sector", "stock", "large")    # the constraints.json blocks with an on switch
 
 
 def newer_than(target: Path, *inputs: Path) -> list[Path]:
@@ -173,7 +182,8 @@ def default_statement() -> dict:
         "approach": "",
         "scope": "",
         "holdings": {"min": 20, "max": 30},
-        "rebalance": {"frequency": "1Q", "drift_threshold": None},
+        "rebalance": {"frequency": "1Q", "drift_threshold": None,
+                      "breach_tolerance": BREACH_TOL},
         "screens": {"turnover": {"on": False, "min_pct": 0.10},
                     "float_cap": {"on": False, "min_bn_vnd": 1000}},
     }
@@ -212,6 +222,13 @@ def validate_statement(s: dict) -> dict:
     if freq is None and drift is None:
         raise BookError(f"{where}: rebalance needs a frequency, a "
                         "drift_threshold, or both")
+    tol = r.get("breach_tolerance", BREACH_TOL)
+    if tol is not None and (isinstance(tol, bool)
+                            or not isinstance(tol, (int, float))
+                            or not 0 < tol < 1):
+        raise BookError(f"{where}: rebalance.breach_tolerance {tol!r} must be a "
+                        "fraction in (0, 1), e.g. 0.10 for 10% of the cap, or "
+                        "null to switch breach off")
 
     sc = s.get("screens", {})
     if not isinstance(sc, dict):
@@ -249,6 +266,7 @@ def load_statement(home: Path) -> dict | None:
 
 def default_constraints() -> dict:
     return {
+        "active": {"budget_pp": 20.0},
         "sector": {"on": False, "max": 0.25, "per_group": {}},
         "stock": {"on": False, "max": 0.10},
         "large": {"on": False, "threshold": 0.05, "aggregate": 0.40},
@@ -274,8 +292,20 @@ def validate_constraints(c: dict) -> dict:
     if unknown:
         raise BookError(f"{CONSTRAINTS}: unknown block(s) {unknown}; "
                         f"available {sorted(base)}")
-    out = {}
-    for block, dflt in base.items():
+    act = c.get("active", base["active"])
+    if not isinstance(act, dict):
+        raise BookError(f"{CONSTRAINTS}: active must be an object")
+    extra = sorted(set(act) - set(base["active"]))
+    if extra:
+        raise BookError(f"{CONSTRAINTS}: active has unknown key(s) {extra}")
+    b = act.get("budget_pp", base["active"]["budget_pp"])
+    if isinstance(b, bool) or not isinstance(b, (int, float)) or not (
+            math.isfinite(b) and 0 < b <= 100):
+        raise BookError(f"{CONSTRAINTS}: active.budget_pp {b!r} must be percentage "
+                        "points in (0, 100], e.g. 20")
+    out = {"active": {"budget_pp": float(b)}}
+    for block in CAPS:
+        dflt = base[block]
         cfg = c.get(block, {"on": False})
         if not isinstance(cfg, dict):
             raise BookError(f"{CONSTRAINTS}: {block} must be an object")

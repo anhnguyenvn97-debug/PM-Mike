@@ -5,6 +5,253 @@ left) and `HANDOFF.md` (the pre-rebuild system, now reference only).
 
 ---
 
+## 2026-09-16 — Breach tolerance is a statement dial (D49)
+
+Review of the three rebalance triggers. Calendar and drift are both set in the
+Statement step; breach was not set anywhere. Which caps trip it came from
+`constraints.json` (Constraints step, already adjustable), but how far a cap may
+be broken before a trade is forced was `BREACH_TOL = 0.10`, a constant in
+`backtest_engine.py` — invisible from the desk and the same for every portfolio.
+
+**D49.** `statement.json` `rebalance.breach_tolerance`: a fraction of the cap, or
+`null` to switch breach off even with caps on. A missing key means 0.10, so every
+existing portfolio keeps the behaviour it has today without a file edit. Caps
+themselves stay owned by the Constraints step; the Statement step only gets the
+slack dial, beside drift.
+
+### Changes
+
+| File | What |
+|---|---|
+| `scr/common.py` | `BREACH_TOL` moved here; `breach_tolerance` in `default_statement()` and validated in `validate_statement()` (fraction in (0, 1) or null); statement docstring. |
+| `scr/backtest_engine.py` | `breach_check(book, groups, tol)` returns `None` when `tol` is `None`; `run()` reads the key with a 0.10 default; `built_from.txt` and the console print the breach setting; docstring. |
+| `scr/static/desk.js` | Breach field in `statementForm` / `readStatementForm` / `bindStatementForm` / `DEFAULT_STATEMENT`; the Backtest tab's Mandate panel reads the tolerance instead of naming 10%. |
+| `tests/` | `test_breach_tolerance_is_set_in_the_statement` (null, 30%, 0.5%); a validation case. |
+
+### Checks
+
+- pytest 106 passed; ruff and `node --check` clean.
+- `energy_focus`, no key on disk: 8 calendar, 6 breach, 0 drift — unchanged, as
+  the user observed. On a scratch copy of the folder: `null` -> 0 breach,
+  turnover 28.30%; `0.25` -> 0 breach; `0.10` -> 6 breach, 38.37%; `0.02` -> 19
+  breach, 52.33%, cost 25.7 bps.
+- Desk on 5055: the field renders checked at 10 for a portfolio with no key, the
+  toggle disables the input, the Mandate panel reads "broken by more than 10% of
+  its limit". Nothing saved.
+
+---
+
+## 2026-09-16 — Group coverage in the Book step (D48)
+
+Review question: PVT is the largest holding in energy_focus although it is the
+smallest live float cap. Cause: the neutral is the group's float-cap weight in
+the benchmark, and PVT was the only Logistics name kept, so it carried the
+whole 30.95% (Logistics is 45.01 tn, the largest of the five live groups; PVT
+is 12.7% of it). Working as designed — deleting a name is stock selection and
+the group keeps its budget.
+
+**D48.** Keep the benchmark neutral; a neutral computed from the names kept
+would be self-referential, since deleting a name would rewrite the anchor it
+is measured against and fuse allocation with selection. Instead the Book step
+shows, per group, `cover <kept float cap / group float cap> · <kept> of <n>
+names · <largest survivor> <its weight> of the book`, amber below one third.
+Display only: no weight, no constraint, no Python change.
+
+### Changes
+
+| File | What |
+|---|---|
+| `scr/static/desk.js` | `coverage()` + `COVER_THIN`; the cover line under each non-NO group. A name claimed by a tactical group leaves both sides of the ratio. |
+| `scr/static/desk.css` | `.gmeta.cover`, `.gmeta.cover.thin`. |
+
+### Checks
+
+- `node --check` ok; pytest 102 passed; browser on port 5055, energy_focus:
+  Logistics `cover 23% · 2 of 4 names · PVT 16.0%` (amber), Construction
+  Contractors `cover 28% · 2 of 6` (amber), Industrial `cover 80% · 1 of 2`.
+  Nothing saved.
+
+---
+
+## 2026-09-16 — Rating control: NO button + UW3-OW3 spectrum (D47)
+
+**D47, the user's design.** The rating stops being four side buttons plus a
+tier row. It is now a red on/off **NO** button (`#E53935`, the only red on the
+page) and, while NO is off, a seven-cell spectrum `UW3 UW2 UW1 AV OW1 OW2 OW3`.
+Clicking a cell sets the rating and lights every cell between AV and it in the
+user's palette; the rest stay grey. AV is lit whenever NO is off. While NO is
+on, the spectrum and the pp input are disabled and the group is out of scope.
+
+Palette (`SPEC` in `desk.js`): `#003366 #0055CC #66B2FF #FFF176 #C8E6C9
+#66BB6A #2E7D32`. UW is the blue half, OW the green half, AV yellow.
+
+No UW/OW end labels under the bar (dropped at the user's request): the caption
+beside the pp box carries the state instead, e.g. `OW2 · range 0.00 to +6.00 pp`.
+
+### Changes
+
+| File | What |
+|---|---|
+| `scr/static/desk.js` | `SPEC`, `inBand`; `rateControl` rewritten (NO toggle, spectrum, pp input below); `[data-side]`/`[data-tier]` handlers replaced by `[data-no]`/`[data-rate]`; Book legend shows the strip. Tactical groups get the spectrum without a NO button. |
+| `scr/static/desk.css` | `.nobtn`, `.spec`, `.specend`, `.specleg`; `.rate` rules removed; group side column 200 -> 236px. |
+
+No Python changed: the grammar on disk is still `NO|UW3..OW3` plus pp, and
+`target.py` checks range, floor, net and budget exactly as before.
+
+### Checks
+
+- `node --check` ok; pytest 102 passed.
+- Browser, port 5055, high_growth: OW2 lights AV/OW1/OW2 with the selected
+  cell ringed; clicking UW3 clamped +5.71 pp to 0 and turned the net red;
+  NO greyed the bar, hid the pp box and showed "out of scope"; NO off
+  returned AV with only AV lit; 20 bars, 20 NO buttons, no console errors;
+  Discard restored the book. Nothing saved.
+
+---
+
+## 2026-09-16 — Screens read the universe, not the book (D46)
+
+The user found that step 3 suggests nothing once a book is curated: `screen`
+walked the book grid, so a name deleted in the Book step could never be
+flagged again. **D46:** screens evaluate every name of the anchor universe
+(`input/sector_constituents.csv`) except those already invalidated, and each
+row of `exclusions.csv` carries `in_book` (yes/no). Invalidating a name that
+is already out of the book is legal and means "never let it back in".
+
+Nothing else changed: exclusions still only suggest, `invalid.csv` keeps its
+old columns, and the list stays private to the portfolio that produced it.
+
+### Changes
+
+| File | What |
+|---|---|
+| `scr/portfolio.py` | `screen()` builds candidates from `input/` + the book, skips invalidated names, adds `in_book`; counts and per-row "(not in the book)" in the log; `EXCL` gains a column, `INVALID_COLS` unchanged. |
+| `scr/static/desk.js`, `desk.css` | Step 3: In-book column (`yes` / `deleted`), dimmed rows for names already out, header count "N in the book, M already out", Select-all restricted to in-book hits, new empty-state wording. |
+| `tests/test_portfolio.py` | `test_screen_covers_the_universe_not_just_the_book`; `in_book` asserted in the existing screen test. 101 -> 102. |
+| `CLAUDE.md` | Pipeline line names the new scope. |
+
+### Checks
+
+- pytest 102 passed; ruff clean; `node --check desk.js` ok.
+- Live: `energy_focus` 100 screened / 92 investable, 3 suggested (8 earlier
+  invalidations no longer re-suggested); `financial_test` 100 / 100, 68.
+- Scratch copy of high_growth at 0.5%/day: 36 suggested, 19 in the book,
+  17 already out — the 17 the old code could not see.
+
+---
+
+## 2026-09-16 — Step 11 done: active-weight tilt, triggers, legacy retired
+
+Built D31-D43. Two further decisions with the user:
+
+- **D44 breach tolerance.** A cap triggers a rebalance only when broken by
+  more than 10% of its limit (stock max 10% -> above 11%; the large set uses
+  1.1 x threshold and 1.1 x aggregate). Names pinned at a cap do not trade on
+  the first uptick.
+- **D45 book conversion.** Existing books converted to reproduce the old
+  weights: pp = 100 (old weight - in-scope neutral), clipped to +-9, tier =
+  smallest covering. AV groups picked up small pp; re-rate by hand.
+
+Design choices made in the build:
+
+- Past dates in the backtest: a group whose neutral is below its underweight
+  is held at 0% and listed in the messages (not a FAIL; the anchor book
+  already passed the strict checks).
+- Baseline grid rows 0-1 stay `AV` placeholders: input/ is compared byte for
+  byte, so a new placeholder would flag every portfolio for a re-fork.
+- The sticky anchor is now resolved from `index/anchor_date.json` against
+  market.db (`baseline.sticky_anchor(db)`); no root copy.
+
+### Changes
+
+| File | What |
+|---|---|
+| `scr/target.py` | `RATINGS`, `TIERS`, `tier_range`, `tilt`; `parse_ratings` reads pp (multiplier books FAIL with a hint); `compute(strict=)` with `active` (net, used, budget, faults, range); outputs `active_pp`, `neutral_weight`, `active_vs_neutral_pp`, `active_vs_baseline_pp`; legacy `apply_caps`, `read_tactical`, sector_cap WARN and sticky INFO removed. |
+| `scr/common.py` | `constraints.json` `active.budget_pp`; `CAPS`; `CAP` removed. |
+| `scr/portfolio.py`, `scr/baseline.py` | pp in carry / auto-NO; fork needs an anchor or a db; sticky root copy removed. |
+| `scr/backtest_engine.py` | `targets_at` via `target.tilt`; `breach_check`; every trigger re-derives the target; `n_breach`. |
+| `scr/app.py`, `scr/static/desk.*` | pp book spec, non-strict preview, rating side + tier + bounded pp, meters, Balance to zero, budget field, Target columns, breach in Backtest. |
+| Removed | `scr/backtest.py`, `scr/load_history.py`, `data/local_history.txt` (+ local .db), `portfolio/baseline/*.csv` and `backtest_rebalance.*`, `hsc_strat_high_growth/backtest/`, `backtest_rebalance.*`, `sector_cap.json` (git rm, staged). |
+| Docs | `CLAUDE.md`, `Task.md`, `.gitignore`, pipelining skill. |
+
+### Checks
+
+- pytest 101 passed; ruff clean; `node --check desk.js` ok.
+- Live targets: all three build; active 9.72 / 1.79 / 9.45 of 20 pp.
+- Live backtests vs VNINDEX from 2026-01-05: high_growth -2.93% (2 calendar,
+  0 breach, 0 drift; was -1.89% with 1 drift trade on the old book and
+  engine), financial_test -2.75% (8 calendar, 1 breach), energy_focus
+  +26.39% (8 calendar, 1 breach, 2 drift).
+- Desk on port 5055: pp clamps to the tier, net blocks Save, Balance to zero
+  and Undo, side switch clamps pp, Target blocked on faults and clear after
+  discard, breach pill and key in Backtest, no console errors. Nothing saved.
+
+---
+
+## 2026-09-16 — Review: tilt, ratings and rebalancing redesign
+
+Decisions from the user's review of the tilt, rating and rebalancing
+mechanism. Nothing built yet; no code changed.
+
+### Findings that led here
+
+- AV is not neutral against the full baseline: cutting NO groups and
+  renormalising inflates every rated group (Banks - Private AV 31.13% ->
+  46.01%; Banks - State UW still ×1.11). Multipliers also size a bet by group
+  size.
+- The drift trigger measured against the last rebalance's target, not today's
+  (`backtest_engine.simulate`, drift branch). hsc_strat_high_growth
+  2026-02-04: 5.51% stale vs 1.52% re-derived; it traded 4.9% turnover it
+  should not have.
+- No check on hard limits between rebalances; calendar resets turn over far
+  more than group drift (Apr 6.8% turnover at ~1-2% re-derived drift).
+
+### Decisions
+
+- **D31 neutral.** Cut NO groups, rescale `free_float × close_raw` over the
+  rest. NO means out of scope only; a negative view is UW.
+- **D32 active weight in pp.** Views are active weight in pp per group,
+  entered by hand. Replaces the multipliers.
+- **D33 net zero.** Σ active = 0, funded by hand. FAIL otherwise.
+- **D34 rating range.** Three strength levels per side, each a pp limit:
+  OW 0..+3 / +6 / +9 pp, AV = 0, UW −3 / −6 / −9..0 pp. FAIL otherwise.
+  Rating labels in the book are settled at build time.
+- **D35 active budget.** ½Σ|active| ≤ B pp for the whole portfolio; B
+  defaults to 20 pp, set per portfolio in `constraints.json`. FAIL otherwise.
+- **D36 floor.** active ≥ −neutral per group (a group may go to 0%, never
+  below). FAIL, no auto-fix.
+- **D37 where the rules live.** Checks in `target.py`. The desk bounds each
+  input to its range, shows net and budget meters, blocks Save on a breach,
+  and offers "Balance to zero" (scales the larger side down; accept or undo).
+- **D38 reporting.** Active pp vs the neutral and vs VNINDEX, after
+  constraints.
+- **D39 within a group.** Float-cap pro-rata stays; stock max and UCITS run
+  after the tilt.
+- **D40 tail positions.** Not fixed. Re-check once the pp target is built
+  (a binding stock max already lifts tails in concentrated groups).
+- **D41 tactical trades.** Out of scope. The existing tactical group is
+  unchanged.
+- **D42 drift trigger re-derives the target.** Each drift check calls
+  `target_fn(i)`, measures drift against it and trades to it; also carries
+  `gone` on drift trades. Supersedes "restores the current target" in D26.
+  Applies to the later rebalance stage too.
+- **D43 breach trigger.** Rebalance to the re-derived target when a name
+  breaks the stock max or the large-holding limits between rebalances.
+
+### Deferred
+
+- Minimum trade size (skip per-name trades under ~0.25 pp).
+- Calendar date as a review: trade only if drift exceeds a smaller band.
+- Trade to the band edge instead of exact target.
+
+### Open inputs for the user
+
+- Converting existing books (`hsc_strat_high_growth`, `financial_test`,
+  `energy_focus`) from multipliers to pp: computed equivalents for review, or
+  re-entered by hand.
+
+---
+
 ## 2026-09-15 — Commit: benchmarks, backtest engine, Backtest tab
 
 Branch `docs/handoff`, on top of `ae463f7`. User chose ONE commit with

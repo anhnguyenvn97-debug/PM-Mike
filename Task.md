@@ -16,6 +16,10 @@ only; every script's module docstring is its spec; no commits until asked (D16).
       OUTSIDE (high_growth 17, soe_dom 100). Set real ranges in each
       `statement.json`.
 - [ ] **Approach / scope text** is blank in both `statement.json` files.
+- [ ] **Review the converted books** (step 11). Views were converted to
+      reproduce the old weights, so several AV groups now carry small OW/UW
+      pp and RE Residential in high_growth is clipped at UW3 −9. Re-rate them
+      in the Book step.
 - [ ] **high_growth lost Mining OW ×4.** Decide whether that view moves to
       another group.
 - [ ] **Delete is permanent.** Desk Delete runs `shutil.rmtree` on
@@ -35,25 +39,23 @@ only; every script's module docstring is its spec; no commits until asked (D16).
 ```
 data/fiinpro/*.xlsx              hand     FiinPro drops, only market input
 index/group_map_live.csv         hand     default sector grouping
-index/anchor_date.json           hand     sticky anchor (2026-09-11)
+index/anchor_date.json           hand     default anchor (2026-09-11)
 index/fol.csv                    hand     FOL limits (deferred, header only)
 portfolio/<name>/statement.json  hand     approach, scope, holdings, mandate, screens
-portfolio/<name>/constraints.json  hand   sector / stock / large caps
-portfolio/<name>/sector_constituents_custom.csv   hand   the book
+portfolio/<name>/constraints.json  hand   active budget pp; sector / stock / large caps
+portfolio/<name>/sector_constituents_custom.csv   hand   the book: active pp, rating
 portfolio/<name>/tactical_group.*  hand, optional
 portfolio/<name>/screen/invalid.csv  CLI   screen --invalidate / --restore
-portfolio/<name>/sector_cap.json   legacy  read only by backtest.py
 
 data/market.db, data/market.txt  derived  scr/ingest.py
 data/params/<anchor>.csv         derived  scr/params.py
 portfolio/baseline/<anchor>/     derived  scr/baseline.py (or fork --anchor)
-portfolio/baseline/*.csv         derived  sticky copy for backtest.py
 portfolio/<name>/input/          derived  scr/portfolio.py fork
 portfolio/<name>/screen/         derived  scr/portfolio.py screen
 portfolio/<name>/target/         derived  scr/target.py
 portfolio/<name>/backtest_config.json  hand/desk  backtest costs, lag, risk-free rate
 portfolio/<name>/backtest_engine/  derived  scr/backtest_engine.py
-portfolio/<name>/backtest/       derived  scr/backtest.py (legacy, untouched)
+data/fiinpro/archive/            kept     old drops, read by nothing
 ```
 
 ---
@@ -185,11 +187,70 @@ portfolio/<name>/backtest/       derived  scr/backtest.py (legacy, untouched)
 - [ ] Stock history in `market.db` starts 2026-01-05; a 2025 window needs a
       2025 stock drop (and index history to match).
 
+## Step 11 — Active-weight tilt and triggers (D31-D43)  [DONE 2026-09-16]
+
+- [x] `target.py`: neutral over non-NO groups + active pp; tiers 3/6/9; net,
+      range, floor, budget checks (strict build, non-strict preview).
+- [x] `constraints.json` `active.budget_pp` (default 20).
+- [x] Book grammar row 0 = pp, row 1 = `NO|UW3..UW1|AV|OW1..OW3`; fork,
+      auto-NO and carry follow.
+- [x] Backtest: drift vs the re-derived target (D42); breach trigger at 10%
+      of a cap's limit (D43); floored past groups reported.
+- [x] Desk: side + tier + bounded pp input, net and budget meters, Balance
+      to zero with undo, Save blocked until balanced; budget in Constraints;
+      Target shows neutral, vs neutral, vs base; breach in the Backtest tab.
+- [x] Three live books converted (weights reproduced); backups in the
+      session scratchpad.
+- [x] Retired `backtest.py`, `load_history.py`, `local_history.*`, the
+      sticky root baseline, `sector_cap.json`, `backtest_rebalance.*`.
+- [x] Tests 91 -> 101; ruff clean; desk browser-checked on port 5055.
+- [ ] `docs/ui_mockup_v3.html` still shows multipliers (reference only).
+
+## Step 12 — Universe-wide screen (D46)  [DONE 2026-09-16]
+
+- [x] `screen` evaluates the anchor universe minus invalidated names;
+      `exclusions.csv` gains `in_book`.
+- [x] Desk step 3: In-book column, dimmed rows for names already out of the
+      book, Select-all limited to in-book hits.
+- [x] Tests 101 -> 102; ruff clean; live runs on both screened portfolios.
+- [ ] A group rated NO still contributes its names to the screen. Small wart:
+      it can suggest invalidating a name in a group you already cut.
+
+## Step 13 — Rating spectrum control (D47)  [DONE 2026-09-16]
+
+- [x] NO on/off button in `#E53935`; spectrum UW3-OW3 with the band lit from
+      AV to the selected cell; pp input bounded to the tier, hidden under NO.
+- [x] Browser-checked on port 5055; nothing saved.
+- [ ] `docs/ui_mockup_v3.html` still shows the old side + tier buttons
+      (reference only).
+
+## Step 14 — Group coverage line (D48)  [DONE 2026-09-16]
+
+- [x] Book step shows cover, names kept of total, and the largest survivor's
+      portfolio weight per group; amber under one third. Display only.
+- [ ] `financial_test` book was saved empty (all groups NO, no names) at
+      09:55 on 2026-09-16 — its target is blocked. Restorable from
+      `input/sector_constituents.csv` plus the ratings in
+      `target/sector_allocation.csv` (built 02:46). Say the word.
+
+## Step 15 — Breach tolerance in the Statement step (D49)  [DONE 2026-09-16]
+
+- [x] `statement.json` `rebalance.breach_tolerance` (fraction, or null to switch
+      breach off); the Statement step gets the toggle + % field beside drift; the
+      engine and the Backtest tab's Mandate panel read it. A missing key means
+      10%, so the live portfolios are unchanged.
+- [ ] Decide the tolerance per portfolio. `energy_focus` at the 10% default ran
+      6 breach rebalances in eight months; `null` or `0.25` gives 0 (turnover
+      28.3% vs 38.4%), `0.02` gives 19 (52.3%, 25.7 bps).
+
 ## Later (not scheduled)
+
+- Minimum trade size; calendar as a review; trade to band edge (deferred in
+  the 2026-09-16 review).
 
 - FOL: fill `index/fol.csv`, add a `fol` screen to `common.SCREENS` (D14).
 - Rebalance stage consuming `statement.json` mandate; drift = ½ Σ |gap| at
-  group grain (D7).
+  group grain (D7), against today's re-derived target (D42).
 - Survivorship bias, sizing/execution (see `HANDOFF.md` §8).
 - Backtest tab: selector to overlay other portfolios' backtests for
   cross-comparison (D29).

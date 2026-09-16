@@ -25,9 +25,9 @@ def client(root):  # noqa: F811
 
 
 def spec(**over):
-    s = {"groups": {"G1": {"rating": "AV", "mult": None, "investable": ["AAA", "BBB"]},
-                    "G2": {"rating": "AV", "mult": None, "investable": ["CCC", "DDD"]},
-                    "G3": {"rating": "AV", "mult": None, "investable": ["EEE"]}},
+    s = {"groups": {"G1": {"rating": "AV", "pp": 0, "investable": ["AAA", "BBB"]},
+                    "G2": {"rating": "AV", "pp": 0, "investable": ["CCC", "DDD"]},
+                    "G3": {"rating": "AV", "pp": None, "investable": ["EEE"]}},
          "tactical": {"on": False, "groups": []}}
     s.update(over)
     return s
@@ -37,7 +37,7 @@ def test_pages_load(root, client):  # noqa: F811
     make(root)
     assert client.get("/").status_code == 200
     st = client.get("/api/state").get_json()
-    assert st["sticky"] == "2026-09-11" and [p["name"] for p in st["portfolios"]] == ["p"]
+    assert st["sticky"] is None and [p["name"] for p in st["portfolios"]] == ["p"]  # no db
     assert st["portfolios"][0]["n"] == 5
     d = client.get("/api/p/p").get_json()
     assert d["anchor"] == "2026-09-11" and d["book"]["G1"]["investable"] == ["AAA", "BBB"]
@@ -48,29 +48,29 @@ def test_pages_load(root, client):  # noqa: F811
 
 def test_save_book_round_trips_and_applies_auto_no(root, client):  # noqa: F811
     home = make(root)
-    s = spec(groups={"G1": {"rating": "OW", "mult": 1.5, "investable": ["BBB", "AAA"]},
-                     "G2": {"rating": "UW", "mult": None, "investable": ["CCC"]},
-                     "G3": {"rating": "AV", "mult": None, "investable": []}},
+    s = spec(groups={"G1": {"rating": "UW2", "pp": -4.123456, "investable": ["BBB", "AAA"]},
+                     "G2": {"rating": "UW1", "pp": -1, "investable": ["CCC"]},
+                     "G3": {"rating": "AV", "pp": None, "investable": []}},
              tactical={"on": True, "groups": [
-                 {"name": "T1", "rating": "OW", "mult": None, "members": ["CCC"]},
-                 {"name": "T2", "rating": "OW", "mult": 2, "members": []}]})
+                 {"name": "T1", "rating": "OW2", "pp": 4.1235, "members": ["CCC"]},
+                 {"name": "T2", "rating": "OW1", "pp": 2, "members": []}]})
     r = client.put("/api/p/p/book", json=s)
     assert r.status_code == 200, r.get_json()["log"]
     assert "G2: no investable name left, rated NO" in r.get_json()["log"]
     g = read_grid(home / BOOK)
-    assert g[:3] == [["1.5", "NO", "NO"], ["OW", "NO", "NO"], ["G1", "G2", "G3"]]
+    assert g[:3] == [["-4.1235", "0", "0"], ["UW2", "NO", "NO"], ["G1", "G2", "G3"]]
     assert g[3:] == [["AAA", "CCC"], ["BBB"]]          # baseline order, G2 keeps CCC
     t = read_grid(home / TAC)
-    assert t[:3] == [["OW", "NO"], ["OW", "NO"], ["T1", "T2"]] and t[3] == ["CCC"]
+    assert t[:3] == [["4.1235", "0"], ["OW2", "NO"], ["T1", "T2"]] and t[3] == ["CCC"]
     assert json.loads((home / TAC_SWITCH).read_text()) == {"tactical_group": "yes"}
 
     d = client.get("/api/p/p").get_json()
-    assert d["book"]["G1"] == {"rating": "OW", "mult": 1.5, "investable": ["AAA", "BBB"]}
-    assert d["tactical"]["groups"][0] == {"name": "T1", "rating": "OW", "mult": None,
+    assert d["book"]["G1"] == {"rating": "UW2", "pp": -4.1235, "investable": ["AAA", "BBB"]}
+    assert d["tactical"]["groups"][0] == {"name": "T1", "rating": "OW2", "pp": 4.1235,
                                           "members": ["CCC"]}
-    # G1 .6 x 1.5 = .9, T1 carries CCC's .2 x 1.25 = .25; the rest are NO
+    # neutral G1 .6 / .8, T1 CCC's .2 / .8; the rest are NO
     assert weights(build(root)) == pytest.approx(
-        {"G1": 0.9 / 1.15, "T1": 0.25 / 1.15, "G2": 0, "G3": 0, "T2": 0})
+        {"G1": 0.75 - 0.041235, "T1": 0.25 + 0.041235, "G2": 0, "G3": 0, "T2": 0})
 
     # no tactical groups: the csv goes, the switch says no
     assert client.put("/api/p/p/book", json=spec()).status_code == 200
@@ -81,8 +81,8 @@ def test_save_book_round_trips_and_applies_auto_no(root, client):  # noqa: F811
 @pytest.mark.parametrize("over, msg", [
     ({"groups": {"G1": {"rating": "AV", "investable": ["CCC"]}}}, "not in the baseline column"),
     ({"groups": {"GX": {"rating": "AV", "investable": []}}}, "unknown group"),
-    ({"groups": {"G1": {"rating": "XX", "investable": ["AAA"]}}}, "unknown rating"),
-    ({"groups": {"G1": {"rating": "OW", "mult": -1, "investable": ["AAA"]}}}, "non-negative"),
+    ({"groups": {"G1": {"rating": "OW", "investable": ["AAA"]}}}, "unknown rating"),
+    ({"groups": {"G1": {"rating": "OW1", "pp": "2", "investable": ["AAA"]}}}, "must be a number"),
     ({"tactical": {"on": True, "groups": [{"name": "T1", "members": ["AAA"]},
                                           {"name": "T2", "members": ["AAA"]}]}},
      "claimed by both T1 and T2"),
@@ -99,7 +99,8 @@ def test_save_book_rejects_bad_input(root, client, over, msg):  # noqa: F811
 
 def test_preview_writes_nothing_and_matches_build(root, client):  # noqa: F811
     home = make(root)
-    s = spec(groups={"G1": {"rating": "OW", "mult": None, "investable": ["AAA"]}})
+    s = spec(groups={"G1": {"rating": "OW1", "pp": 3, "investable": ["AAA"]},
+                     "G2": {"rating": "UW1", "pp": -3, "investable": ["CCC", "DDD"]}})
     cons = {"sector": {"on": False, "max": 0.25, "per_group": {}},
             "stock": {"on": True, "max": 0.5},
             "large": {"on": False, "threshold": 0.05, "aggregate": 0.4}}
@@ -117,6 +118,22 @@ def test_preview_writes_nothing_and_matches_build(root, client):  # noqa: F811
     bad = client.post("/api/p/p/preview", json={**s, "constraints": {
         **cons, "stock": {"on": True, "max": 0.1}}}).get_json()
     assert not bad["ok"] and "max per stock cannot fill the book" in bad["error"]
+
+
+def test_preview_reports_active_faults_build_refuses(root, client):  # noqa: F811
+    make(root)
+    s = spec(groups={"G1": {"rating": "OW1", "pp": 2, "investable": ["AAA", "BBB"]},
+                     "G3": {"rating": "UW3", "pp": -9, "investable": ["EEE"]}})
+    p = client.post("/api/p/p/preview", json=s).get_json()
+    assert p["ok"] and p["active"]["net_pp"] == pytest.approx(-7)
+    assert p["active"]["used_pp"] == pytest.approx(5.5) and p["active"]["budget_pp"] == 20
+    assert len(p["active"]["faults"]) == 1 and "net to -7.000" in p["active"]["faults"][0]
+    rows = {x["group"]: x for x in p["rows"]}
+    assert (rows["G3"]["lo"], rows["G3"]["hi"]) == (-9, 0) and rows["G2"]["hi"] == 0
+    assert rows["G1"]["neutral"] == pytest.approx(0.6)
+    assert client.put("/api/p/p/book", json=s).status_code == 200    # saving is the page's call
+    r = client.post("/api/p/p/build", json={})
+    assert r.status_code == 422 and "net to -7.000" in r.get_json()["log"]
 
 
 def read_col(home, col):
@@ -161,7 +178,7 @@ def test_lifecycle_new_fork_screen_delete(root, client):  # noqa: F811
 
 def test_state_shows_stale_anchor_and_refork(root, client):  # noqa: F811
     home = make(root)
-    edit_book(home, ratings={"G3": "OW"}, mults={"G3": "2"})
+    edit_book(home, ratings={"G3": "OW1", "G1": "UW1"}, pp={"G3": 2, "G1": -2})
     st = client.get("/api/state").get_json()
     assert st["stale"] == {} and st["unmapped"] == []
     assert st["portfolios"][0]["refork"] == {"needed": False}
@@ -171,9 +188,9 @@ def test_state_shows_stale_anchor_and_refork(root, client):  # noqa: F811
     params = pd.read_csv(pp)
     params.loc[params["group"] == "G3", "group"] = "G4"
     params.to_csv(pp, index=False)
-    publish(root, params, ANCHOR, sticky=True)
+    publish(root, params, ANCHOR)
     rf = client.get("/api/state").get_json()["portfolios"][0]["refork"]
-    assert rf == {"needed": True, "lost": {"G3": "OW (mult 2)"}, "appeared": ["G4"]}
+    assert rf == {"needed": True, "lost": {"G3": "OW1 (2 pp)"}, "appeared": ["G4"]}
     assert client.get("/api/p/p").get_json()["refork"] == rf
     assert client.post("/api/p/p/fork", json={"anchor": str(ANCHOR)}).status_code == 200
     assert client.get("/api/p/p").get_json()["refork"] == {"needed": False}
@@ -224,8 +241,11 @@ def test_state_lists_benchmarks(root, client, drop, tmp_path):  # noqa: F811
     assert {ld["file"]: ld["kind"] for ld in m["loads"]} == {"stock.xlsx": "stock",
                                                              "bench.xlsx": "index"}
     assert m["benchmarks"] == [
-        {"code": "VN30", "sessions": 3, "from": "2026-01-06", "to": "2026-01-08", "missing": 1},
-        {"code": "VNINDEX", "sessions": 3, "from": "2026-01-06", "to": "2026-01-08", "missing": 1}]
+        {"code": "VN30", "sessions": 3, "from": "2026-01-06", "to": "2026-01-08", "missing": 1,
+         "late": 0},
+        {"code": "VNINDEX", "sessions": 3, "from": "2026-01-06", "to": "2026-01-08", "missing": 1,
+         "late": 0}]
+    assert m["mcap"] == {"rows": 0, "names": 0, "tickers": []}
 
 
 def test_backtest_run_switches_benchmark_and_writes_nothing(root, client):  # noqa: F811

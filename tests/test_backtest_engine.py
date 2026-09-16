@@ -62,15 +62,15 @@ def triggers(res):
 
 def test_weights_on_the_anchor_equal_target(root):  # noqa: F811
     home = make(root)
-    edit_book(home, ratings={"G1": "OW", "G3": "UW"}, blank=["BBB"])
+    edit_book(home, ratings={"G1": "OW1", "G3": "UW1"}, pp={"G1": 2, "G3": -2}, blank=["BBB"])
     constrain(home, stock={"max": 0.5})
     make_db(root)
     book = be.load_book("p", root / "portfolio", root / "params")
     mk = be.load_market(root / "m.db")
-    w, gone = be.targets_at(book, mk["fcap"].loc[pd.Timestamp(ANCHOR)])
+    w, gone, floored = be.targets_at(book, mk["fcap"].loc[pd.Timestamp(ANCHOR)])
     tw = holdings(book["compute"])
     assert dict(zip(book["names"], w)) == pytest.approx({t: tw.get(t, 0.0) for t in book["names"]})
-    assert gone == []
+    assert gone == [] and floored == []
 
 
 def test_inception_cost_and_lag(root):  # noqa: F811
@@ -83,7 +83,7 @@ def test_inception_cost_and_lag(root):  # noqa: F811
     assert res["equity"]["portfolio"].iloc[-1] == pytest.approx(1 - 0.001)  # buys pay brokerage only
 
 
-def test_returns_drift_the_weights_and_drift_restores_target(root):  # noqa: F811
+def test_returns_drift_the_weights_and_drift_trades_to_target(root):  # noqa: F811
     make(root, rebalance={"frequency": None, "drift_threshold": 0.01})
     make_db(root, jumps=[("2026-09-07", "AAA", 0.10)])
     res = bt(root, "2026-09-01")
@@ -98,6 +98,57 @@ def test_returns_drift_the_weights_and_drift_restores_target(root):  # noqa: F81
     assert e.turnover == pytest.approx(0.5 * (held - tgt).abs().sum())
     end = res["holdings_end"].set_index("ticker")
     assert end.loc["AAA", "weight"] == pytest.approx(0.4)  # restored, flat after
+
+
+def test_drift_is_measured_against_the_rederived_target(root):  # noqa: F811
+    make(root, rebalance={"frequency": None, "drift_threshold": 0.01})
+    # AAA +10% with its float cap: the neutral moves with the market, so the
+    # book has not drifted from its model (the last filled target says 1.5%)
+    make_db(root, jumps=[("2026-09-07", "AAA", 0.10)], fcap={("2026-09-07", "AAA"): 44})
+    res = bt(root, "2026-09-01")
+    assert triggers(res) == [("2026-09-01", "2026-09-02", "inception")]
+
+
+@pytest.mark.parametrize("jump, fired", [(0.10, False), (0.30, True)])
+def test_breach_trigger_waits_for_the_tolerance(root, jump, fired):  # noqa: F811
+    home = make(root, rebalance={"frequency": "1Q", "drift_threshold": None})
+    constrain(home, stock={"max": 0.42})         # AAA's .40 target does not bind
+    make_db(root, jumps=[("2026-09-07", "AAA", jump)])
+    res = bt(root, "2026-09-01")
+    # +10%: AAA .44/1.04 = 42.3%, over the cap but under 1.1 x 42% = 46.2%
+    # +30%: .52/1.12 = 46.4%, a breach; the fill trades back to the target
+    want = [("2026-09-01", "2026-09-02", "inception")]
+    if fired:
+        want.append(("2026-09-07", "2026-09-08", "breach"))
+        assert res["holdings_end"].set_index("ticker").loc["AAA", "weight"] == pytest.approx(0.4)
+        assert res["stats"]["n_breach"] == 1
+    assert triggers(res) == want
+
+
+@pytest.mark.parametrize("tol, fired", [(None, False), (0.30, False), (0.005, True)])
+def test_breach_tolerance_is_set_in_the_statement(root, tol, fired):  # noqa: F811
+    home = make(root, rebalance={"frequency": "1Q", "drift_threshold": None,
+                                 "breach_tolerance": tol})
+    constrain(home, stock={"max": 0.42})
+    make_db(root, jumps=[("2026-09-07", "AAA", 0.10)])   # AAA .44/1.04 = 42.31%
+    res = bt(root, "2026-09-01")
+    # over the 42% cap, so the dial decides: null never trips even with the cap
+    # on, 30% wants 54.6%, 0.5% trips at 42.21%
+    want = [("2026-09-01", "2026-09-02", "inception")]
+    if fired:
+        want.append(("2026-09-07", "2026-09-08", "breach"))
+    assert triggers(res) == want
+
+
+def test_underweight_larger_than_a_past_neutral_holds_zero(root):  # noqa: F811
+    home = make(root, rebalance={"frequency": "1M", "drift_threshold": None})
+    edit_book(home, ratings={"G1": "OW3", "G3": "UW3"}, pp={"G1": 9, "G3": -9})
+    make_db(root, fcap={("2026-06-01", "EEE"): 5, ("2026-08-01", "EEE"): 10})
+    res = bt(root, "2026-07-01")
+    assert "G3" in res["messages"][-1] and "held at 0%" in res["messages"][-1]
+    assert res["rebalances"].iloc[0]["holdings"] == 4               # July: EEE not held
+    end = res["holdings_end"].set_index("ticker")
+    assert end.loc["EEE", "target"] == pytest.approx(0.01)         # September: 10% - 9 pp
 
 
 def test_monthly_calendar_rederives_budgets(root):  # noqa: F811

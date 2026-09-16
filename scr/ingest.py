@@ -251,6 +251,16 @@ def check_calendar(con: duckdb.DuckDBPyConnection) -> tuple[list[str], list[str]
     return errs, warns
 
 
+def mcap_mismatch(con: duckdb.DuckDBPyConnection) -> list[tuple[str, int, float]]:
+    """(ticker, rows, worst relative gap) where vendor market_cap is off
+    close_raw * outstanding_shares by more than 1e-4, most rows first. QA only."""
+    return con.execute(
+        "SELECT ticker, count(*), max(abs(close_raw * outstanding_shares "
+        "- market_cap) / market_cap) FROM prices WHERE abs(close_raw * "
+        "outstanding_shares - market_cap) / market_cap > 1e-4 "
+        "GROUP BY 1 ORDER BY 2 DESC, 1").fetchall()
+
+
 def create_schema(con: duckdb.DuckDBPyConnection) -> None:
     cols = ", ".join(f"{n} {t}" for n, t in SCHEMA)
     con.execute(f"CREATE TABLE prices ({cols}, PRIMARY KEY (trade_date, ticker))")
@@ -383,12 +393,8 @@ def write_dictionary(con: duckdb.DuckDBPyConnection, db: Path, out: Path) -> Non
               f"      {r:,} rows | {dr:,} dropped | {tc} {what} | {a} -> {b}"]
     L.append("")
 
-    bad = con.execute(
-        "SELECT ticker, count(*), max(abs(close_raw * outstanding_shares "
-        "- market_cap) / market_cap) FROM prices WHERE abs(close_raw * "
-        "outstanding_shares - market_cap) / market_cap > 1e-4 "
-        "GROUP BY 1 ORDER BY 2 DESC, 1").fetchall()
-    L += ["QUALITY  vendor market_cap vs close_raw * outstanding_shares",
+    bad = mcap_mismatch(con)
+    L +=["QUALITY  vendor market_cap vs close_raw * outstanding_shares",
           f"  {sum(r[1] for r in bad):,} of {n:,} rows off by >1e-4"]
     L += [f"  {t:<6}{c:>5} rows  worst {w:>7.2%}" for t, c, w in bad[:5]]
     L.append("")

@@ -6,21 +6,17 @@ the params CSV for the anchor date -- float cap, group and membership are
 already there -- so it never touches market.db prices or the group map directly.
 
     portfolio/baseline/<anchor>/     one per anchor, what portfolios fork from
-    portfolio/baseline/              STICKY COPY: the same two files for the
-                                     anchor index/anchor_date.json resolves to.
-                                     Kept only for scr/backtest.py (legacy,
-                                     frozen), which reads the root. Also the
-                                     default anchor for `portfolio.py fork`.
 
     sector_allocation.csv    anchor_date, group, n_members, fcap, weight
     sector_constituents.csv  the A-Z grid, one column per group:
-        row 0   multiplier   AV | NO | OW | UW, or a number
-        row 1   rating       AV | NO | OW | UW
-        row 2   group name
-        row 3+  tickers, A-Z, blank-padded
+        rows 0-1  AV placeholders, never parsed; a fork writes the book's own
+        row 2     group name
+        row 3+    tickers, A-Z, blank-padded
 
-Both rows 0-1 are all AV: baseline is untilted by definition, so baseline and
-custom books are structurally identical and one reader parses both.
+The grid keeps the book's shape, so a book is this grid with rows 0-1
+rewritten and cells blanked. Rows 0-1 stay AV on purpose: portfolios compare
+input/ to this file byte for byte, and a new placeholder would flag every
+portfolio for a re-fork.
 
 Weighting is float cap within group and float cap across groups, which is flat
 float cap across all names. float_cap = free_float * close_raw (see params.py).
@@ -36,10 +32,9 @@ and the extract date. The price is still the official close, but a stock
 dividend credits shares days after the ex-date, so free_float may be stale for
 those names. Pick a cleaner anchor if the listed weights matter.
 
-The sticky copy is refreshed only when the built anchor is the one the resolver
-picks with no --date. It WARNs when that changes the group set: portfolios on
-the sticky anchor must be re-forked (portfolio.py fork carries ratings and the
-investable universe across by group name).
+sticky_anchor() is that resolver with no --date: the default anchor for
+`portfolio.py fork` and the desk. A rebuilt baseline whose groups changed is
+flagged per portfolio by the desk (re-fork needed); nothing is copied.
 
 ensure(anchor) is the on-demand path `portfolio.py fork --anchor` uses: it runs
 params.py and builds the dated folder only when either is missing or stale, so
@@ -50,7 +45,6 @@ Usage
     .venv\\Scripts\\python.exe scr\\baseline.py --date 2026-09-11
 """
 import argparse
-import shutil
 import sys
 from pathlib import Path
 
@@ -119,12 +113,13 @@ def sessions_of(db: Path) -> set:
         con.close()
 
 
-def sticky_anchor(root: Path = BASELINE) -> str:
-    """Anchor of the sticky copy at the baseline root."""
-    p = root / ALLOC
-    if not p.exists():
-        raise BookError(f"no sticky baseline at {p}\n      run scr/baseline.py")
-    return str(pd.read_csv(p, usecols=["anchor_date"])["anchor_date"].iloc[0])
+def sticky_anchor(db: Path = DB, anchor_cfg: Path = ANCHOR_CFG) -> str:
+    """index/anchor_date.json if it names a session, else the latest session."""
+    try:
+        anchor, _ = resolve_anchor(sessions_of(db), None, anchor_cfg)
+    except ValueError as e:
+        raise BookError(str(e))
+    return str(anchor)
 
 
 def ensure(anchor: str, db: Path = DB, params_dir: Path = PARAMS,
@@ -153,7 +148,6 @@ def run(date: str | None, db: Path = DB, params_dir: Path = PARAMS,
     sessions = sessions_of(db)
     try:
         anchor, how = resolve_anchor(sessions, date, anchor_cfg)
-        sticky, _ = resolve_anchor(sessions, None, anchor_cfg)
     except ValueError as e:
         raise BookError(str(e))
 
@@ -179,25 +173,6 @@ def run(date: str | None, db: Path = DB, params_dir: Path = PARAMS,
     if adj:
         print(f"WARN  corporate action after the anchor, free_float may be "
               f"stale: {adj}")
-
-    if anchor == sticky:
-        prev_p = root / ALLOC
-        prev = set(pd.read_csv(prev_p, usecols=["group"])["group"]) \
-            if prev_p.exists() else set()
-        for f in (ALLOC, GRID):
-            shutil.copyfile(outdir / f, root / f)
-        print(f"      sticky copy refreshed at {root} (read by backtest.py)")
-        now = set(groups)
-        added, gone = sorted(now - prev), sorted(prev - now)
-        if prev and (added or gone):
-            print("WARN  group set changed on the sticky baseline; re-fork "
-                  "portfolios on it (scr/portfolio.py fork <name>)")
-            if added:
-                print(f"      appeared:    {added}")
-            if gone:
-                print(f"      disappeared: {gone}")
-    else:
-        print(f"      sticky anchor is {sticky}; root copy left unchanged")
     print(f"      weights sum to {alloc['weight'].sum():.10f}")
     return 0
 

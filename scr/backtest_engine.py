@@ -1,7 +1,6 @@
 """Backtest engine: a portfolio replayed under its own mandate against a benchmark.
 
-Replaces nothing: scr/backtest.py (legacy) keeps running on local_history.db.
-This engine reads data/market.db and the desk's files only:
+Reads data/market.db and the desk's files only:
 
     statement.json          rebalance mandate + holdings range (required)
     book, tactical overlay, constraints.json, screen/invalid.csv
@@ -16,23 +15,35 @@ Target weights on session d -- target.py's math on d's float cap:
 
     fcap_i = free_float_i x close_raw_i       on d, never close_adj or market_cap
     b_g    = sum of fcap over the FULL baseline column / total, claims migrated
-    w_g    = b_g x m_g / sum(b x m)           over live groups with a priced name
-    w_i    = split by fcap, or target.apply_constraints when any constraint is on
+    n_g    = b_g / sum b                      over live groups with a priced name
+    w_g    = target.tilt(n, active pp)        n_g + a_g / 100, floored at 0
+    w_i    = split by fcap, or target.apply_constraints when any cap is on
 
-On the anchor these are target.compute's weights. A live group with no priced
-name on d drops out and the rest renormalise (reported per rebalance). A
-constraint that cannot be solved on a past date FAILs; the book never holds cash.
+On the anchor these are target.compute's weights (the book passed its strict
+active checks there). A live group with no priced name on d drops out, its pp
+with it, and the rest renormalise (reported per rebalance). A group whose
+neutral on d is smaller than its underweight is held at 0% (counted in the
+messages). A cap that cannot be solved on a past date FAILs; the book never
+holds cash.
 
-Mandate (statement.json rebalance):
+Triggers, checked at each close while no fill is pending, first match wins:
 
-    frequency        2W | 1M | 1Q | null. A scheduled rebalance on the first
-                     session of each period re-derives the target on that
-                     session. 1M / 1Q are calendar periods; 2W counts 14-day
-                     periods from the Monday of the start session's week.
-                     null: inception only.
-    drift_threshold  fraction | null. At each close, drift = 1/2 sum over
-                     groups of |held - target|; above the threshold a drift
-                     rebalance restores the CURRENT target (no re-derivation).
+    calendar   statement.json frequency 2W | 1M | 1Q | null: the first session
+               of each period. 1M / 1Q are calendar periods; 2W counts 14-day
+               periods from the Monday of the start session's week. null:
+               inception only.
+    breach     a cap in constraints.json broken by more than statement.json
+               rebalance.breach_tolerance (a missing key means 10%) of its limit
+               by the drifted weights (D43, D49): at 10% a name above
+               1.1 x stock.max; the names above 1.1 x large.threshold summing
+               above 1.1 x large.aggregate; a group above 1.1 x its sector cap.
+               Names the solver pins at a cap do not trade on the first uptick.
+               A null tolerance switches breach off even with caps on.
+    drift      statement.json drift_threshold: 1/2 sum over groups of
+               |held - target| above the threshold (D42).
+
+Every trigger re-derives the target on its session and trades to it, and drift
+is measured against that re-derived target, never the last one filled (D42).
 
 The start session always decides inception. A decision observes session t's
 close and fills at the close of t + lag_sessions; no new decision while a
@@ -67,7 +78,8 @@ benchmark must be one of them. build() adds the files,
 overwritten in portfolio/<name>/backtest_engine/:
 
     equity.csv         date, portfolio, benchmark (both 1.0 at the start close)
-    rebalances.csv     decision, fill, trigger, group drift, turnover, cost,
+    rebalances.csv     decision, fill, trigger (inception | calendar | breach |
+                       drift), group drift vs the new target, turnover, cost,
                        holdings, in_range, groups with no priced name
     holdings_end.csv   ticker, group, drifted weight at the end, last target
     summary.csv        one row: window, benchmark, config, statistics
@@ -87,6 +99,7 @@ import numpy as np
 import pandas as pd
 import target
 from common import (
+    BREACH_TOL,
     BT_CONFIG,
     DB,
     PARAMS,
@@ -134,24 +147,25 @@ def load_book(name: str, portfolio: Path = PORTFOLIO, params_dir: Path = PARAMS)
         raise BookError(f"portfolio/{name}/{STATEMENT} is missing; the backtest "
                         "follows its rebalance mandate")
     alloc = r["allocation"]
-    mult = dict(zip(alloc["group"], alloc["multiplier"]))
+    active = dict(zip(alloc["group"], alloc["active_pp"]))
+    rating = dict(zip(alloc["group"], alloc["rating"]))
     sectors = [g for g, k in zip(alloc["group"], alloc["kind"]) if k == "sector"]
     tac = list(r["tac_groups"])
-    live = [g for g in sectors + tac if mult[g] > 0]
+    live = [g for g in sectors + tac if rating[g] != "NO"]
     group_of = {t: g for g in live for t in r["members"][g]}
-    return {"name": name, "anchor": r["anchor"], "compute": r, "mult": mult,
-            "sectors": sectors, "tac": tac, "live": live,
+    return {"name": name, "anchor": r["anchor"], "compute": r, "active": active,
+            "rating": rating, "sectors": sectors, "tac": tac, "live": live,
             "claim": {t: g for g in tac for t in r["members"][g]},
             "names": sorted(group_of), "group_of": group_of,
             "rebalance": r["statement"]["rebalance"],
             "holdings": r["statement"]["holdings"]}
 
 
-def targets_at(book: dict, fcap: pd.Series, when: str = "") -> tuple[np.ndarray, list]:
-    """Target weights over book["names"] on one session's float cap, and the
-    live groups dropped for having no priced name."""
+def targets_at(book: dict, fcap: pd.Series, when: str = "") -> tuple[np.ndarray, list, list]:
+    """Target weights over book["names"] on one session's float cap, the live
+    groups dropped for having no priced name, and the groups held at 0%."""
     r = book["compute"]
-    full, members, mult = r["full"], r["members"], book["mult"]
+    full, members = r["full"], r["members"]
     alive = fcap.notna() & (fcap > 0)
     ok = lambda t: t in alive.index and bool(alive[t])
     sector_fcap = {g: float(sum(fcap[t] for t in full[g] if ok(t))) for g in book["sectors"]}
@@ -166,19 +180,57 @@ def targets_at(book: dict, fcap: pd.Series, when: str = "") -> tuple[np.ndarray,
     mem = {g: [t for t in members[g] if ok(t)] for g in book["live"]}
     live = [g for g in book["live"] if mem[g]]
     gone = [g for g in book["live"] if not mem[g]]
-    denom = sum(bweight.get(g, 0.0) * mult[g] for g in live)
-    if denom <= 0:
+    scope = sum(bweight.get(g, 0.0) for g in live)
+    if scope <= 0:
         raise BookError(f"{when}: no live group has a priced name")
-    w_raw = {g: bweight.get(g, 0.0) * mult[g] / denom for g in live}
+    neutral = {g: bweight.get(g, 0.0) / scope for g in live}
+    try:
+        w_raw, _, floored = target.tilt(neutral, {g: book["active"][g] for g in live},
+                                        {g: book["rating"][g] for g in live},
+                                        r["constraints"]["active"]["budget_pp"])
+    except BookError as e:
+        raise BookError(f"{when}: {e}")
+    held = [g for g in live if w_raw[g] > EPS]
     if r["any_on"]:
         try:
-            stock = target.apply_constraints(w_raw, mem, fcap, r["constraints"])["stock"]
+            stock = target.apply_constraints({g: w_raw[g] for g in held}, mem, fcap,
+                                             r["constraints"])["stock"]
         except BookError as e:
             raise BookError(f"{when}: {e}")
     else:
         stock = {t: w_raw[g] * fcap[t] / sum(fcap[u] for u in mem[g])
-                 for g in live for t in mem[g]}
-    return np.array([stock.get(t, 0.0) for t in book["names"]]), gone
+                 for g in held for t in mem[g]}
+    return np.array([stock.get(t, 0.0) for t in book["names"]]), gone, floored
+
+
+def breach_check(book: dict, groups: list, tol: float | None = BREACH_TOL):
+    """-> fn(w) naming the first cap the drifted weights break by more than
+    tol of its limit, or None when no cap is on or tol is None."""
+    cons = book["compute"]["constraints"]
+    sec, stk, lg = cons["sector"], cons["stock"], cons["large"]
+    if tol is None or not (sec["on"] or stk["on"] or lg["on"]):
+        return None
+    k = 1 + tol
+    labels = sorted(set(groups))
+    gi = np.array([labels.index(g) for g in groups], dtype=int)
+    names = book["names"]
+    caps = np.array([sec["per_group"].get(g, sec["max"]) for g in labels]) if sec["on"] else None
+
+    def fn(w):
+        if stk["on"] and w.max() > k * stk["max"]:
+            return f"{names[int(w.argmax())]} {w.max():.2%} > stock max {stk['max']:.2%}"
+        if lg["on"]:
+            big = w[w > k * lg["threshold"]].sum()
+            if big > k * lg["aggregate"]:
+                return f"large holdings {big:.2%} > aggregate {lg['aggregate']:.2%}"
+        if sec["on"]:
+            gw = np.bincount(gi, w, len(labels))
+            over = gw > k * caps
+            if over.any():
+                j = int(np.argmax(np.where(over, gw - caps, -np.inf)))
+                return f"{labels[j]} {gw[j]:.2%} > sector cap {caps[j]:.2%}"
+        return None
+    return fn
 
 
 # --------------------------------------------------------------- simulation
@@ -197,10 +249,11 @@ def period_keys(sessions: pd.DatetimeIndex, start: int, freq: str | None):
 
 
 def simulate(R: np.ndarray, sessions, start: int, freq, threshold, cfg: dict,
-             target_fn, groups: list) -> tuple[list, list, np.ndarray, np.ndarray]:
+             target_fn, groups: list, breach=None) -> tuple[list, list, np.ndarray, np.ndarray]:
     """NAV per session from start, fill events, final weights, last target.
 
-    R[i] is each name's return into session i; target_fn(i) -> (weights, gone).
+    R[i] is each name's return into session i; target_fn(i) -> (weights, gone);
+    breach(w) -> a reason or None (breach_check), None when no cap is on.
     """
     N, n = R.shape
     lag = cfg["lag_sessions"]
@@ -239,16 +292,19 @@ def simulate(R: np.ndarray, sessions, start: int, freq, threshold, cfg: dict,
         if pending is not None and pending["fill"] == i:
             fill(i)
         if pending is None and i + lag < N:
+            trigger = None
             if i == start or (keys is not None and keys[i] != keys[i - 1]):
+                trigger = "calendar" if invested else "inception"
+            elif invested and breach is not None and breach(w):
+                trigger = "breach"
+            if trigger or (threshold is not None and invested):
                 t, gone = target_fn(i)
-                pending = {"fill": i + lag, "decision": i, "t": t, "gone": gone,
-                           "trigger": "calendar" if invested else "inception",
-                           "drift": drift(w, tgt) if invested else None}
-            elif threshold is not None and invested:
-                dr = drift(w, tgt)
-                if dr > threshold:
-                    pending = {"fill": i + lag, "decision": i, "t": tgt, "gone": [],
-                               "trigger": "drift", "drift": dr}
+                dr = drift(w, t) if invested else None
+                if trigger is None and dr > threshold:
+                    trigger = "drift"
+                if trigger:
+                    pending = {"fill": i + lag, "decision": i, "t": t, "gone": gone,
+                               "trigger": trigger, "drift": dr}
             if pending is not None and lag == 0:
                 fill(i)
         navs.append(nav)
@@ -280,6 +336,7 @@ def statistics(nav: np.ndarray, bench: np.ndarray, events: list, rf: float) -> d
             "turnover": sum(e["turnover"] for e in later),
             "cost": sum(e["cost"] for e in events),
             "n_calendar": sum(e["trigger"] == "calendar" for e in events),
+            "n_breach": sum(e["trigger"] == "breach" for e in events),
             "n_drift": sum(e["trigger"] == "drift" for e in events),
             "sessions": n, "years": years}
 
@@ -329,11 +386,23 @@ def run(name: str, start: str | None = None, benchmark: str = "VNINDEX",
     groups = [book["group_of"][t] for t in book["names"]]
     freq = book["rebalance"]["frequency"]
     threshold = book["rebalance"]["drift_threshold"]
+    tol = book["rebalance"].get("breach_tolerance", BREACH_TOL)
+
+    cache, floored = {}, set()
 
     def target_fn(i):
-        return targets_at(book, mk["fcap"].iloc[i], str(S[i].date()))
+        if i not in cache:
+            w_i, gone, fl = targets_at(book, mk["fcap"].iloc[i], str(S[i].date()))
+            cache.clear()                          # sessions only move forward
+            cache[i] = (w_i, gone)
+            floored.update(fl)
+        return cache[i]
 
-    navs, events, w, tgt = simulate(R, S, i0, freq, threshold, cfg, target_fn, groups)
+    navs, events, w, tgt = simulate(R, S, i0, freq, threshold, cfg, target_fn, groups,
+                                    breach_check(book, groups, tol))
+    if floored:
+        messages.append(f"INFO  held at 0% on some sessions, the neutral smaller than "
+                        f"the underweight: {sorted(floored)}")
     nav = np.array(navs)
     bnav = bench.to_numpy() / bench.iloc[0]
     lo, hi = book["holdings"]["min"], book["holdings"]["max"]
@@ -371,7 +440,7 @@ def summary_row(res: dict) -> dict:
             **{f"p_{k}": v for k, v in s["portfolio"].items()},
             **{f"b_{k}": v for k, v in s["benchmark"].items()},
             **{k: s[k] for k in ("excess", "tracking_error", "information_ratio", "beta",
-                                 "turnover", "cost", "n_calendar", "n_drift")}}
+                                 "turnover", "cost", "n_calendar", "n_breach", "n_drift")}}
 
 
 def build(name: str, start: str | None = None, benchmark: str = "VNINDEX",
@@ -391,13 +460,15 @@ def build(name: str, start: str | None = None, benchmark: str = "VNINDEX",
     s, c, rb = res["stats"], res["config"], res["rebalance"]
     freq = rb["frequency"] or "none (inception only)"
     drift = f"{rb['drift_threshold']:.2%} group grain" if rb["drift_threshold"] else "off"
+    tol = rb.get("breach_tolerance", BREACH_TOL)
+    breach = f"{tol:.0%} of the cap" if tol is not None else "off"
     cfg_src = (f"portfolio/{name}/{BT_CONFIG}" if (portfolio / name / BT_CONFIG).exists()
                else "defaults (no backtest_config.json)")
     (out / "built_from.txt").write_text(
         f"portfolio:   {name}, book as of anchor {res['anchor']}\n"
         f"window:      {res['start']} -> {res['end']} ({s['sessions']} sessions)\n"
         f"benchmark:   {res['benchmark']}, PRICE index rebased to the start close\n"
-        f"mandate:     rebalance {freq}; drift {drift}; holdings "
+        f"mandate:     rebalance {freq}; drift {drift}; breach {breach}; holdings "
         f"{res['holdings_range']['min']}-{res['holdings_range']['max']}\n"
         f"constraints: {res['constraints']}\n"
         f"tactical:    {res['tactical']}\n"
@@ -415,7 +486,7 @@ def build(name: str, start: str | None = None, benchmark: str = "VNINDEX",
     fmt = lambda v, f: "n/a" if v is None else format(v, f)
     print(f"OK    {name}  {res['start']} -> {res['end']}  {s['sessions']} sessions  "
           f"vs {res['benchmark']}")
-    print(f"      mandate rebalance {freq}, drift {drift}; lag {c['lag_sessions']}, "
+    print(f"      mandate rebalance {freq}, drift {drift}, breach {breach}; lag {c['lag_sessions']}, "
           f"{c['brokerage_bps']:g}+{c['sell_tax_bps']:g} bps")
     print(f"      -> {out}\\equity.csv, rebalances.csv, holdings_end.csv, summary.csv")
     print()
@@ -427,7 +498,8 @@ def build(name: str, start: str | None = None, benchmark: str = "VNINDEX",
     print(f"      {'max drawdown':<22} {p['max_drawdown']:>10.2%} {b['max_drawdown']:>10.2%}")
     print(f"      excess {s['excess']:+.2%}  TE {s['tracking_error']:.2%}  "
           f"IR {fmt(s['information_ratio'], '.2f')}  beta {fmt(s['beta'], '.2f')}")
-    print(f"      rebalances {s['n_calendar']} calendar, {s['n_drift']} drift; turnover "
+    print(f"      rebalances {s['n_calendar']} calendar, {s['n_breach']} breach, "
+          f"{s['n_drift']} drift; turnover "
           f"{s['turnover']:.1%}; costs {s['cost'] * 1e4:.1f} bps")
     for e in res["rebalances"].itertuples():
         if not e.in_range:

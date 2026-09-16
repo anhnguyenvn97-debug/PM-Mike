@@ -34,7 +34,7 @@ Match the glyphs, arrows and ordering; the content will have moved on.
           ╚══════╤═══════╝
                  │
                  ▼
-   portfolio/baseline/<anchor>/  one per anchor (+ sticky root copy)
+   portfolio/baseline/<anchor>/  one per anchor
                  │
                  ▼
           ╔══════════════════╗

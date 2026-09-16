@@ -19,14 +19,10 @@ desktop.ini
 # --- derived, rebuildable ---
 # ingest.py rebuilds market.db from data/fiinpro/ on every run, so it is a pure
 # function of files that ARE tracked. A binary rewritten whole on each build has
-# no business in git history. local_history.db is the same, from
-# data/fiinpro/archive/ via the legacy load_history.py (backtester only).
+# no business in git history.
 data/market.db
 data/market.db.building
 data/market.db*.wal
-data/local_history.db
-data/local_history.db.building
-data/local_history.db*.wal
 
 # --- rejected drops, kept locally for reference only ---
 data/fiinpro/rejected/
@@ -38,6 +34,6 @@ data/fiinpro/rejected/
 # record of the adjustment state they were pulled under: not reproducible,
 # therefore tracked.
 #
-#   data/market.txt, data/local_history.txt, data/params/*.csv
+#   data/market.txt, data/params/*.csv
 # Small, diffable, regenerated every build. Their diffs record how the stores
 # and parameters changed between commits.

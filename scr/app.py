@@ -19,6 +19,9 @@ and so is a tactical group that claims nothing.
 
 Live preview posts the unsaved book, overlay and constraints to /preview, which
 runs target.compute with them as overrides: the same solver, nothing written.
+It runs non-strict, so a book whose active pp do not net to zero yet still
+previews; the faults, the net, the budget used and each group's allowed pp
+range come back in "active". Build is strict.
 
 The Data tab lists every drop in data/fiinpro/ (stock and index alike, see
 ingest.py) and, per benchmark in index_prices, its sessions, range, and the
@@ -40,14 +43,15 @@ backtest_config.json (validate_backtest_config, version-checked).
 
 Book spec, as the page sends it:
 
-    {"groups":   {"<group>": {"rating": "OW", "mult": 1.5 | null,
+    {"groups":   {"<group>": {"rating": "OW2", "pp": 4.5,
                               "investable": ["TCB", ...]}},
      "tactical": {"on": true, "groups": [{"name": "SOE Divestment",
-                  "rating": "OW", "mult": 2 | null, "members": ["GAS"]}]}}
+                  "rating": "OW1", "pp": 2, "members": ["GAS"]}]}}
 
-mult null means the rating default. Tickers must be in their baseline column
-(tactical: anywhere in the universe), never invalidated, and a stock sits in at
-most one tactical group.
+pp is the active weight in percentage points (null or missing = 0; NO always
+0). The tier range, floor, net and budget are target.py's to check. Tickers
+must be in their baseline column (tactical: anywhere in the universe), never
+invalidated, and a stock sits in at most one tactical group.
 
 Bound to 127.0.0.1 only. Mutations need a JSON body and a local Host header,
 so a web page elsewhere cannot drive the app.
@@ -59,6 +63,7 @@ import contextlib
 import csv
 import io
 import json
+import math
 import os
 import re
 import sys
@@ -77,6 +82,7 @@ from common import (
     ALLOC,
     BOOK,
     BT_CONFIG,
+    CAPS,
     CONSTRAINTS,
     DB,
     FORKED,
@@ -109,7 +115,7 @@ from flask import Flask, abort, jsonify, render_template, request
 import portfolio as pf
 
 HERE = Path(__file__).resolve().parent
-RATINGS = tuple(target.DEFAULT_MULT)
+RATINGS = target.RATINGS
 DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 LOCAL = {"127.0.0.1", "localhost"}
 
@@ -137,17 +143,17 @@ def dump(obj) -> str:
     return json.dumps(obj, indent=2) + "\n"
 
 
-def mult_cell(rating: str, mult) -> str:
-    """Row-0 cell: the rating when there is no override, else the number."""
-    if rating == "NO" or mult is None:
-        return rating
-    if isinstance(mult, bool) or not isinstance(mult, (int, float)) or mult < 0:
-        raise BookError(f"multiplier {mult!r} must be a non-negative number or blank")
-    return f"{float(mult):g}"
+def pp_cell(rating: str, pp) -> str:
+    """Row-0 cell: the active pp, 4 decimals at most; NO and a missing value are 0."""
+    if rating == "NO" or pp is None:
+        return "0"
+    if isinstance(pp, bool) or not isinstance(pp, (int, float)) or not math.isfinite(pp):
+        raise BookError(f"active pp {pp!r} must be a number")
+    return f"{round(float(pp), 4) + 0.0:g}"
 
 
-def cell_mult(cell: str):
-    return None if cell in target.DEFAULT_MULT else float(cell)
+def cell_pp(cell: str) -> float:
+    return float(cell) if cell else 0.0
 
 
 def tactical_grid(spec: dict, universe: set, invalid: set) -> tuple[list, list, dict]:
@@ -172,7 +178,7 @@ def tactical_grid(spec: dict, universe: set, invalid: set) -> tuple[list, list, 
         if rating not in RATINGS:
             raise BookError(f"{name}: unknown rating {rating!r}")
         names.append(name)
-        row0.append(mult_cell(rating, tg.get("mult")))
+        row0.append(pp_cell(rating, tg.get("pp")))
         row1.append(rating)
         cols.append(members)
     return [row0, row1, names], cols, claim
@@ -188,7 +194,7 @@ def book_grid(base: list[list[str]], spec: dict, invalid: set,
     row0, row1, cols = [], [], []
     for j, g in enumerate(groups):
         col = grid_column(base, j)
-        s = specs.get(g, {"rating": "AV", "mult": None, "investable": col})
+        s = specs.get(g, {"rating": "AV", "pp": 0, "investable": col})
         keep = set(s.get("investable", []))
         alien = sorted(keep - set(col))
         if alien:
@@ -202,7 +208,7 @@ def book_grid(base: list[list[str]], spec: dict, invalid: set,
             raise BookError(f"{g}: unknown rating {rating!r}")
         if not [t for t in names if t not in claim]:
             rating = "NO"
-        row0.append(mult_cell(rating, s.get("mult")))
+        row0.append(pp_cell(rating, s.get("pp")))
         row1.append(rating)
         cols.append(names)
     return [row0, row1, list(groups)], cols
@@ -305,17 +311,21 @@ def market() -> dict:
             "SELECT i.code, count(*), min(i.trade_date), max(i.trade_date), "
             "(SELECT count(*) FROM (SELECT DISTINCT trade_date FROM prices) s "
             " WHERE s.trade_date NOT IN (SELECT trade_date FROM index_prices j "
-            "                            WHERE j.code = i.code)) "
+            "                            WHERE j.code = i.code)), "
+            "count(*) FILTER (WHERE i.trade_date > (SELECT max(trade_date) FROM prices)) "
             "FROM index_prices i GROUP BY 1 ORDER BY 1").fetchall() \
             if "index_prices" in tables else []
+        mcap = ingest.mcap_mismatch(con) if rows else []
     finally:
         con.close()
     out.update(rows=rows, tickers=tickers, loads=[
         {"file": r[0], "rows": r[1], "dropped": r[2], "from": str(r[3]),
          "to": str(r[4]), "tickers": r[5], "loaded_at": str(r[6])[:16], "kind": r[7]}
         for r in loads],
-        benchmarks=[{"code": c, "sessions": n, "from": str(a), "to": str(b), "missing": m}
-                    for c, n, a, b, m in bench],
+        benchmarks=[{"code": c, "sessions": n, "from": str(a), "to": str(b), "missing": m,
+                     "late": lt} for c, n, a, b, m, lt in bench],
+        mcap={"rows": sum(r[1] for r in mcap), "names": len(mcap),
+              "tickers": [{"ticker": t, "rows": c, "worst": w} for t, c, w in mcap[:5]]},
         rebuilt=stamp(db))
     return out
 
@@ -403,10 +413,12 @@ def universe(anchor: str) -> dict:
 
 
 def preview_json(res: dict) -> dict:
-    sec, hold = res["allocation"], res["holdings"]
+    sec, hold, act = res["allocation"], res["holdings"], res["active"]
     rows = [{"group": r.group, "kind": r.kind, "rating": r.rating,
-             "m": float(r.multiplier), "base": float(r.baseline_weight),
-             "unc": float(r.uncapped_weight), "w": float(r.weight),
+             "pp": float(r.active_pp), "base": float(r.baseline_weight),
+             "neutral": float(r.neutral_weight), "unc": float(r.uncapped_weight),
+             "w": float(r.weight), "vs_neutral": float(r.active_vs_neutral_pp),
+             "lo": act["range"][r.group][0], "hi": act["range"][r.group][1],
              "migrated": float(r.migrated_out), "capped": bool(r.capped),
              "full": bool(r.full), "n": int(r.n_members),
              "n_all": len(res["full"][r.group])} for r in sec.itertuples()]
@@ -416,7 +428,8 @@ def preview_json(res: dict) -> dict:
     return {"ok": True, "rows": rows, "holdings": holdings, "n": len(holdings),
             "in_range": res["in_range"], "range_note": res["range_note"],
             "cap_note": res["cap_note"], "tac_note": res["tac_note"],
-            "report": res["report"], "messages": res["messages"]}
+            "report": res["report"], "messages": res["messages"],
+            "active": {k: act[k] for k in ("net_pp", "used_pp", "budget_pp", "faults")}}
 
 
 def num(x):
@@ -458,7 +471,7 @@ def summary(name: str) -> dict:
            "built_at": read_kv(home / "target" / "built_from.txt").get("built_at")}
     try:
         out["statement"] = load_statement(home)
-        out["constraints_on"] = [k for k, v in load_constraints(home).items() if v["on"]]
+        out["constraints_on"] = [k for k in CAPS if load_constraints(home)[k]["on"]]
         out["anchor"] = portfolio_anchor(home)
         out["refork"] = refork(home, out["anchor"])
         p = preview_json(target.compute(name, app.config["PORTFOLIO"],
@@ -505,7 +518,8 @@ def detail(name: str) -> dict:
         out["book"] = {}
         try:
             for j, g in enumerate(book[2]):
-                out["book"][g] = {"rating": book[1][j], "mult": cell_mult(book[0][j]),
+                out["book"][g] = {"rating": book[1][j],
+                                  "pp": cell_pp(book[0][j] if j < len(book[0]) else ""),
                                   "investable": grid_column(book, j)}
         except (IndexError, ValueError) as e:
             out["errors"].append(f"{BOOK} is malformed: {e}")
@@ -515,7 +529,8 @@ def detail(name: str) -> dict:
         if (home / TAC).exists():
             g = read_grid(home / TAC)
             out["tactical"]["groups"] = [
-                {"name": n, "rating": g[1][j], "mult": cell_mult(g[0][j]),
+                {"name": n, "rating": g[1][j],
+                 "pp": cell_pp(g[0][j] if j < len(g[0]) else ""),
                  "members": grid_column(g, j)} for j, n in enumerate(g[2])] \
                 if len(g) >= 3 else []
     except (BookError, IndexError, ValueError) as e:
@@ -578,9 +593,8 @@ def index():
 def state():
     with LOCK:
         ss = sessions()
-        root = app.config["PORTFOLIO"] / "baseline"
         try:
-            sticky = baseline.sticky_anchor(root)
+            sticky = baseline.sticky_anchor(app.config["DB"]) if ss else None
         except BookError:
             sticky = None
         base = None
@@ -711,7 +725,8 @@ def preview(name):
         return preview_json(target.compute(name, app.config["PORTFOLIO"],
                                            app.config["PARAMS"], book=book,
                                            tactical=tac,
-                                           constraints=b.get("constraints")))
+                                           constraints=b.get("constraints"),
+                                           strict=False))
     ok, log, res = run(calc)
     if not ok:
         return jsonify(ok=False, error=log.removeprefix("FAIL  ").strip())

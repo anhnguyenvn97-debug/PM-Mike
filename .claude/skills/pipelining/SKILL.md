@@ -16,7 +16,7 @@ Skip whatever this conversation already established. Fill only the gaps.
 
 | Look at | For |
 | --- | --- |
-| `data/fiinpro/` | the drops feeding ingest (top level only; `archive/` feeds the legacy store) |
+| `data/fiinpro/` | the drops feeding ingest (top level only; `archive/` is kept history, read by nothing) |
 | `data/market.txt` | database state: rows, tickers, sessions, quality |
 | `scr/*.py` | script stages — read the module docstring, not the code |
 | `index/*` | hand-edited layers: group map, anchor date, FOL |
@@ -27,9 +27,9 @@ directory listing won't tell you:
 
 - **Who edits what.** `index/*`, `statement.json`, the book and the overlay
   files are hand-edited. `market.db`, `params/`, `baseline/`, `input/`,
-  `screen/` and `target/` never are.
-- **What is legacy.** `load_history.py` → `local_history.db` → `backtest.py`
-  is frozen and runs beside the main pipeline, not inside it.
+  `screen/`, `target/` and `backtest_engine/` never are.
+- **What branches off.** `backtest_engine.py` replays `target.py`'s math on
+  `market.db` under the statement's mandate; it feeds nothing downstream.
 
 ## 2. Draw it
 

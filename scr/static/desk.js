@@ -3,7 +3,27 @@
    them through /preview; nothing reaches disk until Save. */
 "use strict";
 
-const DEF = {NO:0, UW:0.75, AV:1, OW:1.25};
+/* Rating tiers mirror target.TIERS. The bounds here only keep inputs in range;
+   target.py checks range, floor, net and budget on every preview and build. */
+const TIER = {"1":3, "2":6, "3":9};
+const NET_TOL = 1e-3;
+const side = r => r.startsWith("OW") ? "ow" : r.startsWith("UW") ? "uw" : r.toLowerCase();
+const tierRange = r => r === "NO" || r === "AV" ? [0, 0] : r.startsWith("OW") ? [0, TIER[r[2]]] : [-TIER[r[2]], 0];
+/* The rating spectrum, UW3 to OW3: [rating, fill, ink]. AV sits in the middle and
+   belongs to every range. NO is the only red on the page. */
+const SPEC = [["UW3","#003366","#FFFFFF"], ["UW2","#0055CC","#FFFFFF"], ["UW1","#66B2FF","#0B2545"],
+              ["AV","#FFF176","#4A3F00"],
+              ["OW1","#C8E6C9","#14421F"], ["OW2","#66BB6A","#08260F"], ["OW3","#2E7D32","#FFFFFF"]];
+const AV_AT = 3;
+const COVER_THIN = 1 / 3;     // below this the group's weight rests on a sliver of it
+/* Cell r is lit when it lies between AV and the selected rating, inclusive. */
+function inBand(sel, r){
+  if (sel === "NO") return false;
+  if (r === "AV") return true;
+  const i = SPEC.findIndex(c => c[0] === r), s = SPEC.findIndex(c => c[0] === sel);
+  return s < AV_AT ? i >= s && i < AV_AT : s > AV_AT && i <= s && i > AV_AT;
+}
+const fpp = (v, d=2) => (v > 0.0000001 ? "+" : v < -0.0000001 ? "−" : "") + Math.abs(v).toFixed(d);
 const FREQ = {"2W":"Every 2 weeks","1M":"Monthly","1Q":"Quarterly"};
 const EPS = 1e-12;
 const STEPS = [
@@ -80,14 +100,15 @@ function model(d, keep){
     P.u = u;
   }
   const c = d.constraints;
-  P.cons = {sector:{on:c.sector.on, max:c.sector.max, per:{...c.sector.per_group},
+  P.cons = {active:{budget:c.active.budget_pp},
+            sector:{on:c.sector.on, max:c.sector.max, per:{...c.sector.per_group},
                     mode:Object.keys(c.sector.per_group).length ? "individual" : "universal"},
             stock:{on:c.stock.on, max:c.stock.max},
             large:{on:c.large.on, T:c.large.threshold, L:c.large.aggregate}};
   if (P.u && d.book){
-    P.u.groups.forEach(g => { const b = d.book[g.name] || {rating:"AV", mult:null, investable:g.members.map(m=>m.t)};
-      P.book[g.name] = {rating:b.rating, mult:b.mult, included:new Set(b.investable), autoNo:false}; });
-    P.tac = {on:d.tactical.on, groups:d.tactical.groups.map(g => ({name:g.name, rating:g.rating, mult:g.mult, tickers:[...g.members], autoNo:g.rating === "NO" && !g.members.length}))};
+    P.u.groups.forEach(g => { const b = d.book[g.name] || {rating:"AV", pp:0, investable:g.members.map(m=>m.t)};
+      P.book[g.name] = {rating:b.rating, pp:b.pp, included:new Set(b.investable), autoNo:false}; });
+    P.tac = {on:d.tactical.on, groups:d.tactical.groups.map(g => ({name:g.name, rating:g.rating, pp:g.pp, tickers:[...g.members], autoNo:g.rating === "NO" && !g.members.length}))};
   }
   /* keep unsaved edits across a reload that did not change them on disk */
   if (keep && keep.dirty.book && P.u && d.book && keep.anchor === P.anchor){
@@ -108,31 +129,73 @@ async function loadPortfolio(opts={}){
 const ready = P => P && P.u && Object.keys(P.book).length;
 function claims(P){ const c = {}; if (P.tac.on) P.tac.groups.forEach(tg => tg.tickers.forEach(t => { if (!P.invalid.has(t)) c[t] = tg.name; })); return c; }
 function survivors(P, g){ const c = claims(P); const bk = P.book[g.name]; return g.members.filter(m => bk.included.has(m.t) && !P.invalid.has(m.t) && !c[m.t]); }
+/* How much of a group its kept names actually are. The group's neutral is its
+   float-cap weight in the benchmark, so names deleted or invalidated still
+   support it and the survivors carry their share: cover says how thin that is.
+   A name claimed by a tactical group leaves with its budget, so it leaves both
+   sides. Display only -- no weight depends on this. */
+function coverage(P, g, x){
+  const c = claims(P);
+  const base = g.members.filter(m => !c[m.t]);
+  const den = base.reduce((a, m) => a + m.fcap, 0);
+  const surv = survivors(P, g);
+  const num = surv.reduce((a, m) => a + m.fcap, 0);
+  if (!den || !surv.length) return null;
+  const top = surv.reduce((a, m) => m.fcap > a.fcap ? m : a, surv[0]);
+  return {cover:num / den, kept:surv.length, of:base.length, top:top.t,
+          topw: x ? x.w * top.fcap / num : null};
+}
 /* auto-NO: an empty investable box is NO; a name arriving in an auto-NO group makes it AV again */
 function normalize(P){
   if (!ready(P)) return;
   P.u.groups.forEach(g => {
     const bk = P.book[g.name]; const n = survivors(P, g).length;
-    if (n === 0 && bk.rating !== "NO"){ bk.rating = "NO"; bk.mult = null; bk.autoNo = true; }
+    if (n === 0 && bk.rating !== "NO"){ bk.rating = "NO"; bk.pp = 0; bk.autoNo = true; }
     else if (n > 0 && bk.autoNo){ bk.rating = "AV"; bk.autoNo = false; }
   });
   P.tac.groups.forEach(tg => {
     tg.tickers = tg.tickers.filter(t => P.u.FC[t] !== undefined && !P.invalid.has(t));
-    if (!tg.tickers.length && tg.rating !== "NO"){ tg.rating = "NO"; tg.mult = null; tg.autoNo = true; }
+    if (!tg.tickers.length && tg.rating !== "NO"){ tg.rating = "NO"; tg.pp = 0; tg.autoNo = true; }
     else if (tg.tickers.length && tg.autoNo){ tg.rating = "AV"; tg.autoNo = false; }
   });
 }
 function bookSpec(P){
   const groups = {};
-  P.u.groups.forEach(g => { const b = P.book[g.name]; groups[g.name] = {rating:b.rating, mult:b.rating==="NO" ? null : b.mult, investable:g.members.map(m=>m.t).filter(t => b.included.has(t))}; });
-  return {groups, tactical:{on:P.tac.on, groups:P.tac.groups.map(g => ({name:g.name, rating:g.rating, mult:g.rating==="NO" ? null : g.mult, members:g.tickers}))}};
+  P.u.groups.forEach(g => { const b = P.book[g.name]; groups[g.name] = {rating:b.rating, pp:b.rating==="NO" ? 0 : b.pp, investable:g.members.map(m=>m.t).filter(t => b.included.has(t))}; });
+  return {groups, tactical:{on:P.tac.on, groups:P.tac.groups.map(g => ({name:g.name, rating:g.rating, pp:g.rating==="NO" ? 0 : g.pp, members:g.tickers}))}};
+}
+/* the rows the target reads: every book group, tactical groups while the overlay is on */
+const activeRows = P => [...Object.values(P.book), ...(P.tac.on ? P.tac.groups : [])];
+function activeSums(P){
+  const rows = activeRows(P);
+  const net = rows.reduce((a, b) => a + b.pp, 0), used = rows.reduce((a, b) => a + Math.abs(b.pp), 0) / 2;
+  const budget = P.cons.active.budget;
+  return {net, used, budget, netOk:Math.abs(net) <= NET_TOL, budgetOk:used <= budget + NET_TOL};
+}
+function setRating(bk, r){
+  const [lo, hi] = tierRange(r);
+  bk.rating = r; bk.autoNo = false; bk.pp = Math.min(hi, Math.max(lo, bk.pp));
+}
+/* Balance to zero: scale the larger side (OW or UW) down to the smaller; a
+   scale-down never breaks a range, the floor or the budget. Rounded to 0.01 pp. */
+function balance(P){
+  const rows = activeRows(P);
+  const pos = rows.filter(b => b.pp > 0), neg = rows.filter(b => b.pp < 0);
+  const sp = pos.reduce((a, b) => a + b.pp, 0), sn = -neg.reduce((a, b) => a + b.pp, 0);
+  if (Math.abs(sp - sn) <= NET_TOL) return;
+  P.undoPP = rows.map(b => [b, b.pp]);
+  const [big, k] = sp > sn ? [pos, sn / sp] : [neg, sp / sn];
+  big.forEach(b => { b.pp = Math.round(b.pp * k * 100) / 100; });
+  const net = Math.round(rows.reduce((a, b) => a + b.pp, 0) * 100) / 100;
+  if (net){ const m = big.reduce((a, b) => Math.abs(b.pp) >= Math.abs(a.pp) ? b : a); m.pp = Math.round((m.pp - net) * 100) / 100; }
 }
 function consSpec(P){
   const c = P.cons;
   const known = new Set([...(P.u ? P.u.groups.map(g=>g.name) : []), ...(P.tac.on ? P.tac.groups.map(g=>g.name) : [])]);
   const per = {};
   if (c.sector.mode === "individual") Object.entries(c.sector.per).forEach(([g, v]) => { if (known.has(g)) per[g] = v; });
-  return {sector:{on:c.sector.on, max:c.sector.max, per_group:per},
+  return {active:{budget_pp:c.active.budget},
+          sector:{on:c.sector.on, max:c.sector.max, per_group:per},
           stock:{on:c.stock.on, max:c.stock.max},
           large:{on:c.large.on, threshold:c.large.T, aggregate:c.large.L}};
 }
@@ -148,7 +211,7 @@ async function runPreview(){
   if (seq !== S.seq || S.P !== P) return;
   S.preview = res; render();
 }
-const edited = (what) => { S.P.dirty[what] = true; normalize(S.P); render(); schedulePreview(); };
+const edited = (what, keepUndo=false) => { S.P.dirty[what] = true; if (!keepUndo) S.P.undoPP = null; normalize(S.P); render(); schedulePreview(); };
 
 /* ---------- nav ---------- */
 function renderNav(){
@@ -172,44 +235,37 @@ function renderData(){
   const maxW = base ? Math.max(...base.groups.map(g => g.weight)) : 1;
   const opts = [...st.eligible].reverse().map(d => `<option value="${d}" ${d===st.sticky?"selected":""}>${d}${!st.anchors.includes(d) ? "  (not built)" : st.stale[d] ? "  (stale)" : ""}</option>`).join("");
   const stale = Object.entries(st.stale);
-  const status = st.unmapped.length
-    ? `<span class="pill bad">${st.unmapped.length} unmapped</span>`
-    : stale.length ? `<span class="pill warn">${stale.length} anchor${stale.length > 1 ? "s" : ""} stale</span>` : `<span class="pill ok">fresh</span>`;
-  return `<div class="page">
+  const checks = dataChecks(st);
+  const nWarn = checks.filter(c => c.lvl !== "ok").length;
+  return `<div class="page wide">
     <div class="head"><div><div class="crumbs">data/market.db</div><h1>Market data</h1></div>
       ${m.db ? `<span class="pill ok">${st.sessions.length} sessions to ${st.sessions.at(-1)}</span>` : `<span class="pill bad">No database</span>`}</div>
+    <div class="flow"><div class="page">
     <div class="grid2">
       <section class="panel">
-        <div class="panel-h"><h2>Ingest FiinPro drops</h2><button class="btn primary" id="runIngest">Rebuild database</button></div>
-        <div class="panel-b" style="display:flex;flex-direction:column;gap:14px">
-          ${m.db ? `<dl class="kv">
-            <dt>Rows</dt><dd>${bn(m.rows)}</dd>
-            <dt>Tickers</dt><dd>${m.tickers}</dd>
-            <dt>Sessions</dt><dd>${st.sessions.length} · ${st.sessions[0]} → ${st.sessions.at(-1)}</dd>
-            <dt>Rebuilt</dt><dd>${m.rebuilt}</dd>
-          </dl>` : ""}
+        <div class="panel-h"><h2>Database</h2><button class="btn primary" id="runIngest">Rebuild database</button></div>
+        <div class="panel-b stack">
+          ${m.db ? `<dl class="kv"><dt>Last built</dt><dd>${m.rebuilt}</dd></dl>
+          <div class="dbsum">
+            <div><div class="label">Stock</div><dl class="kv">
+              <dt>Tickers</dt><dd>${m.tickers}</dd>
+              <dt>Sessions</dt><dd>${st.sessions.length}</dd>
+              <dt>From</dt><dd>${st.sessions[0]}</dd>
+              <dt>To</dt><dd>${st.sessions.at(-1)}</dd>
+            </dl></div>
+            <div><div class="label">Benchmarks</div>${benchSummary(m.benchmarks ?? [])}</div>
+          </div>` : `<p class="note bad">No database. Rebuild it from the drops in <span class="mono">data/fiinpro/</span>.</p>`}
           <div class="scroll"><table>
-            <thead><tr><th>Drop in data/fiinpro/</th><th class="n">MB</th><th>State</th></tr></thead>
+            <thead><tr><th>Inputs</th><th class="n">MB</th><th>State</th></tr></thead>
             <tbody>${m.drops.length ? m.drops.map(dp => `<tr><td class="mono">${esc(dp.file)}</td><td class="n">${dp.mb}</td><td>${dp.newer_than_db ? '<span class="pill xs warn">newer than database</span>' : '<span class="pill xs ok">loaded</span>'}</td></tr>`).join("") : `<tr><td colspan="3" class="empty">No drops</td></tr>`}</tbody>
           </table></div>
-          ${m.loads?.length ? `<div class="scroll"><table>
-            <thead><tr><th>Loaded</th><th>Kind</th><th class="n">Rows</th><th class="n">Dropped</th><th class="n">Names</th><th>Range</th></tr></thead>
-            <tbody>${m.loads.map(l => `<tr><td class="mono">${esc(l.file)}</td><td>${l.kind}</td><td class="n">${bn(l.rows)}</td><td class="n">${bn(l.dropped)}</td><td class="n">${l.tickers}</td><td class="mono">${l.from} → ${l.to}</td></tr>`).join("")}</tbody>
-          </table></div>` : ""}
-          ${m.db ? `<div class="scroll"><table>
-            <thead><tr><th>Benchmark</th><th class="n">Sessions</th><th>Range</th><th>Stock sessions</th></tr></thead>
-            <tbody>${m.benchmarks?.length ? m.benchmarks.map(b => `<tr><td class="mono">${esc(b.code)}</td><td class="n">${b.sessions}</td><td class="mono">${b.from} → ${b.to}</td><td>${b.missing ? `<span class="pill xs warn">${b.missing} missing</span>` : '<span class="pill xs ok">all covered</span>'}</td></tr>`).join("") : `<tr><td colspan="4" class="empty">No index drop loaded</td></tr>`}</tbody>
-          </table></div>` : ""}
-          <p class="note">Drop new exports into <span class="mono">data/fiinpro/</span>: stock exports (a Ticker column) and index exports (an Index/Sector column) side by side. The database is rebuilt from scratch into a temp file and swapped in only if every drop validates. Benchmarks are <b>price</b> indexes: dividends are not reinvested, so a total-return backtest leads them by roughly the dividend yield.</p>
         </div>
-        ${consoleBox("ingest")}
       </section>
       <section class="panel">
-        <div class="panel-h"><h2>Parameters and baselines</h2>${status}</div>
-        <div class="panel-b" style="display:flex;flex-direction:column;gap:14px">
-          <div class="inline"><label for="bdate" class="label">Anchor</label><select id="bdate" style="width:auto">${opts}</select><button class="btn primary" id="runParams">Build params and baseline</button></div>
-          ${st.unmapped.length ? `<p class="note warn"><b>Not in the group map:</b> <span class="mono">${st.unmapped.map(esc).join(" ")}</span>. These trade on the latest session but <span class="mono">index/group_map_live.csv</span> has no group for them. Add the rows by hand; a build on that session fails until you do.</p>` : ""}
+        <div class="panel-h"><h2>Parameters and baselines</h2><button class="btn primary" id="runParams">Build params and baseline</button></div>
+        <div class="panel-b stack">
           ${stale.length ? `<p class="note warn"><b>Stale, rebuild:</b> ${stale.map(([a, why]) => `${a} (${why.map(esc).join(", ")} is newer)`).join("; ")}. A fork onto a stale anchor rebuilds it first.</p>` : ""}
+          <div class="inline"><label for="bdate" class="label">Anchor</label><select id="bdate" style="width:auto">${opts}</select></div>
           <dl class="kv">
             <dt>Sticky anchor</dt><dd>${st.sticky ?? "none"} · index/anchor_date.json</dd>
             <dt>Built anchors</dt><dd>${st.anchors.length ? st.anchors.map(a => a + (st.stale[a] ? " (stale)" : "")).join(" · ") : "none"}</dd>
@@ -219,7 +275,6 @@ function renderData(){
           </dl>
           <p class="note">Runs <span class="mono">params.py</span> then <span class="mono">baseline.py</span> for the anchor; both re-read the group map, so this is the button after editing it. The sticky copy at the baseline root is refreshed only for the sticky anchor. Portfolios keep their own copy of the baseline until you re-fork them.</p>
         </div>
-        ${consoleBox("params")}
       </section>
     </div>
     ${base ? `<section class="panel">
@@ -231,7 +286,64 @@ function renderData(){
           <td><div class="bar"><div class="t" style="width:${g.weight/maxW*100}%;background:var(--accent)"></div></div></td></tr>`; }).join("")}</tbody>
       </table></div>
     </section>` : ""}
+    </div>
+    <aside class="aside">
+      <section class="panel">
+        <div class="panel-h"><h2>Checks</h2>${nWarn ? `<span class="pill warn">${nWarn} to review</span>` : '<span class="pill ok">all clear</span>'}</div>
+        <ul class="checks">${checks.map(c => `<li class="${c.lvl}"><i aria-hidden="true"></i><div><b>${c.title}</b>${c.body ? `<div class="cb">${c.body}</div>` : ""}</div></li>`).join("")}</ul>
+      </section>
+      ${["ingest", "params"].filter(k => S.console[k]).map(k => `<section class="panel">
+        <div class="panel-h"><h3>Last run · ${k === "ingest" ? "Rebuild database" : "Build params and baseline"}</h3></div>
+        ${consoleBox(k)}
+      </section>`).join("")}
+    </aside>
+    </div>
   </div>`;
+}
+
+/* benchmark names, then sessions/from/to once when every index shares them */
+function benchSummary(bs){
+  if (!bs.length) return '<p class="empty">No index drop loaded</p>';
+  const same = bs.every(b => b.sessions === bs[0].sessions && b.from === bs[0].from && b.to === bs[0].to);
+  const span = b => `<dt>Sessions</dt><dd>${b.sessions}</dd><dt>From</dt><dd>${b.from}</dd><dt>To</dt><dd>${b.to}</dd>`;
+  return same
+    ? `<ul class="bnames">${bs.map(b => `<li>${esc(b.code)}</li>`).join("")}</ul><dl class="kv">${span(bs[0])}</dl>`
+    : bs.map(b => `<div class="bnames">${esc(b.code)}</div><dl class="kv">${span(b)}</dl>`).join("");
+}
+
+/* Data-tab health checks, worst first: each {lvl: ok|warn|bad, title, body} */
+function dataChecks(st){
+  const m = st.market, out = [];
+  if (!m.db) return [{lvl:"bad", title:"No database", body:"Rebuild database from the drops in <span class=\"mono\">data/fiinpro/</span>."}];
+  const last = st.sessions.at(-1);
+
+  const newer = m.drops.filter(d => d.newer_than_db);
+  out.push(newer.length
+    ? {lvl:"warn", title:`${newer.length} drop${newer.length > 1 ? "s" : ""} newer than the database`, body:`<span class="mono">${newer.map(d => esc(d.file)).join(", ")}</span>. Rebuild database to load ${newer.length > 1 ? "them" : "it"}.`}
+    : {lvl:"ok", title:`All ${m.drops.length} drops loaded`});
+
+  const bs = m.benchmarks ?? [];
+  const byKey = (list, key) => Object.values(list.reduce((a, b) => ((a[key(b)] ??= []).push(b), a), {}));
+  const late = byKey(bs.filter(b => b.late), b => `${b.late}|${b.to}`);
+  late.forEach(g => out.push({lvl:"warn", title:"Benchmarks run past the stock data",
+    body:`<span class="mono">${g.map(b => esc(b.code)).join(", ")}</span> ${g.length > 1 ? "have" : "has"} ${g[0].late} session${g[0].late > 1 ? "s" : ""} after the last stock session <span class="mono">${last}</span> (index to <span class="mono">${g[0].to}</span>). Add a stock drop through ${g[0].to}; until then everything stops at ${last}.`}));
+  const gaps = bs.filter(b => b.missing);
+  if (gaps.length) out.push({lvl:"warn", title:"Benchmarks miss stock sessions",
+    body: gaps.map(b => `<span class="mono">${esc(b.code)}</span> misses ${b.missing}`).join(" · ") + ". A backtest over those sessions falls back to a covered benchmark."});
+  if (!bs.length) out.push({lvl:"warn", title:"No benchmark index loaded", body:"Add an index export (Index/Sector column) to <span class=\"mono\">data/fiinpro/</span>."});
+  else if (!late.length && !gaps.length) out.push({lvl:"ok", title:"Benchmarks match the stock calendar", body:`${bs.map(b => esc(b.code)).join(", ")} to ${last}.`});
+
+  const mc = m.mcap;
+  if (mc?.rows) out.push({lvl:"warn", title:`Vendor market cap off on ${bn(mc.rows)} of ${bn(m.rows)} rows`,
+    body:`<table class="mini"><thead><tr><th>Ticker</th><th class="n">Rows</th><th class="n">Worst</th></tr></thead><tbody>${mc.tickers.map(t => `<tr><td class="mono">${esc(t.ticker)}</td><td class="n">${t.rows}</td><td class="n">${pct(t.worst)}</td></tr>`).join("")}</tbody></table>${mc.names > mc.tickers.length ? `<div>+${mc.names - mc.tickers.length} more names.</div>` : ""}<div>QA only: weights use free float × official close, so targets are unaffected.</div>`});
+  else if (mc) out.push({lvl:"ok", title:"Vendor market cap reconciles", body:"close × shares on every row."});
+
+  out.push(st.unmapped.length
+    ? {lvl:"bad", title:`${st.unmapped.length} ticker${st.unmapped.length > 1 ? "s" : ""} not in the group map`, body:`<span class="mono">${st.unmapped.map(esc).join(" ")}</span> trade on ${last}. Add them to <span class="mono">index/group_map_live.csv</span>; a build on that session fails until you do.`}
+    : {lvl:"ok", title:"Group map covers the latest session"});
+
+  const rank = {bad:0, warn:1, ok:2};
+  return out.sort((a, b) => rank[a.lvl] - rank[b.lvl]);
 }
 function bindData(){
   $("#runIngest").onclick = () => action("ingest", "POST", "/api/run/ingest", {}, async () => { await refreshState(); });
@@ -307,6 +419,7 @@ function bindList(){
 /* ---------- statement form ---------- */
 function statementForm(st, isNew){
   const r = st.rebalance;
+  const tol = r.breach_tolerance === undefined ? 0.10 : r.breach_tolerance;
   return `<div class="form">
     ${isNew ? `<div class="field full"><label for="f_name">Folder name</label><input type="text" id="f_name" placeholder="hsc_strat_dividend"><span class="hint">Lowercase letters, digits, underscore. Becomes portfolio/&lt;name&gt;/.</span></div>` : ""}
     <div class="field full"><label for="f_app">Approach strategy</label><textarea id="f_app" placeholder="e.g. Growth at a reasonable price; overweight consumption and private banks on credit recovery.">${esc(st.approach)}</textarea><span class="hint">Reference text for later review. Not used in calculations.</span></div>
@@ -320,6 +433,10 @@ function statementForm(st, isNew){
       <div class="inline"><label class="toggle"><input type="checkbox" id="f_drift_on" ${r.drift_threshold!==null?"checked":""}> On</label>
       <input type="number" id="f_drift" min="1" max="99" step="1" value="${r.drift_threshold!==null ? Math.round(r.drift_threshold*100) : 8}" style="width:80px" ${r.drift_threshold===null?"disabled":""}></div>
       <span class="hint">Drift = ½ Σ |actual − target| across groups. Whichever trigger fires first.</span></div>
+    <div class="field"><label for="f_breach">Rebalance on breach, % of the cap</label>
+      <div class="inline"><label class="toggle"><input type="checkbox" id="f_breach_on" ${tol!==null?"checked":""}> On</label>
+      <input type="number" id="f_breach" min="1" max="99" step="1" value="${tol!==null ? Math.round(tol*100) : 10}" style="width:80px" ${tol===null?"disabled":""}></div>
+      <span class="hint">How far a Constraints-step cap may be broken before a trade is forced: 10% of a 20% stock cap trips at 22%. Off means caps never force one.</span></div>
     <div class="field full"><span class="err" id="f_err" role="alert"></span></div>
   </div>`;
 }
@@ -328,14 +445,16 @@ function readStatementForm(base){
   st.approach = $("#f_app").value.trim(); st.scope = $("#f_scope").value.trim();
   st.holdings = {min: parseInt($("#f_min").value,10), max: parseInt($("#f_max").value,10)};
   const f = $("[data-freq][aria-pressed=true]").dataset.freq;
-  st.rebalance = {frequency: f==="none" ? null : f, drift_threshold: $("#f_drift_on").checked ? (+$("#f_drift").value)/100 : null};
+  st.rebalance = {frequency: f==="none" ? null : f, drift_threshold: $("#f_drift_on").checked ? (+$("#f_drift").value)/100 : null,
+                  breach_tolerance: $("#f_breach_on").checked ? (+$("#f_breach").value)/100 : null};
   return st;
 }
 function bindStatementForm(){
   $$("[data-freq]").forEach(b => b.onclick = () => $$("[data-freq]").forEach(x => x.setAttribute("aria-pressed", x===b)));
   $("#f_drift_on").onchange = e => $("#f_drift").disabled = !e.target.checked;
+  $("#f_breach_on").onchange = e => $("#f_breach").disabled = !e.target.checked;
 }
-const DEFAULT_STATEMENT = {approach:"", scope:"", holdings:{min:20,max:30}, rebalance:{frequency:"1Q", drift_threshold:null},
+const DEFAULT_STATEMENT = {approach:"", scope:"", holdings:{min:20,max:30}, rebalance:{frequency:"1Q", drift_threshold:null, breach_tolerance:0.10},
   screens:{turnover:{on:false,min_pct:0.10}, float_cap:{on:false,min_bn_vnd:1000}}};
 function renderNew(){
   return `<div class="page" style="max-width:760px">
@@ -365,8 +484,8 @@ function stepStatus(P, k){
     case "statement": return st ? mandateText(st.rebalance) + ` · ${st.holdings.min}–${st.holdings.max}` : "missing";
     case "fork": return P.anchor ? `anchor ${P.anchor}` : "not forked";
     case "screen": { const on = Object.values(st.screens).filter(v=>v.on).length; return `${on ? on + " on" : "off"} · ${P.invalid.size} invalid`; }
-    case "book": { if (!ready(P)) return "fork first"; const no = Object.values(P.book).filter(b=>b.rating==="NO").length; return `${r?.ok ? r.n + " names · " : ""}${no} NO${P.tac.on ? " · tactical" : ""}${P.dirty.book ? " · unsaved" : ""}`; }
-    case "constraints": { const on = Object.entries(P.cons).filter(([,v])=>v.on).map(([k])=>k); return (on.length ? on.join(" · ") : "off") + (P.dirty.cons ? " · unsaved" : ""); }
+    case "book": { if (!ready(P)) return "fork first"; const a = activeSums(P); return `${r?.ok ? r.n + " names · " : ""}${a.used.toFixed(1)}/${a.budget} pp${a.netOk ? "" : " · net " + fpp(a.net, 1)}${P.tac.on ? " · tactical" : ""}${P.dirty.book ? " · unsaved" : ""}`; }
+    case "constraints": { const on = ["sector","stock","large"].filter(k => P.cons[k].on); return (on.length ? on.join(" · ") : "caps off") + (P.dirty.cons ? " · unsaved" : ""); }
     case "target": return !r ? "" : r.ok ? `${r.n} names` : "blocked";
   }
 }
@@ -410,7 +529,7 @@ function renderFlow(){
           <span class="label">Largest groups</span>
           ${top.map(x => `<div style="display:grid;grid-template-columns:1fr auto;gap:2px 8px;font-size:12.5px">
             <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(x.group)}</span><span class="num">${pct(x.w,1)}</span>
-            <div class="bar" style="grid-column:1/-1;height:6px;min-width:0"><div class="t" style="top:0;bottom:0;width:${x.w*100}%;background:var(--${x.rating.toLowerCase()})"></div></div></div>`).join("")}
+            <div class="bar" style="grid-column:1/-1;height:6px;min-width:0"><div class="t" style="top:0;bottom:0;width:${x.w*100}%;background:var(--${side(x.rating)})"></div></div></div>`).join("")}
         </div></section>` : ""}
         ${P.statement ? `<section class="panel"><div class="panel-b kv" style="font-size:12.5px">
           <dt>Rebalance</dt><dd style="font-family:var(--sans)">${mandateText(P.statement.rebalance)}</dd>
@@ -440,7 +559,7 @@ function stepFork(P){
         <div class="field"><label for="anchorSel">Baseline anchor</label><select id="anchorSel">${opts}</select>
           <span class="hint">Any session with 21 sessions of history behind it. One that is not built yet gets its params and baseline built first.</span></div>
         <div class="field"><label>&nbsp;</label><div class="inline"><button class="btn primary" id="refork" ${P.dirty.book ? "disabled" : ""}>${P.anchor ? "Re-fork onto selected" : "Fork"}</button></div>
-          <span class="hint">${P.dirty.book ? "Save or discard the Book edits first: forking rebuilds the book." : "Carries ratings, multipliers and the investable universe by group name."}</span></div>
+          <span class="hint">${P.dirty.book ? "Save or discard the Book edits first: forking rebuilds the book." : "Carries ratings, active pp and the investable universe by group name."}</span></div>
       </div>
       ${P.anchor ? `<dl class="kv">
         <dt>Forked from</dt><dd>${esc(P.forked.forked_from)}</dd>
@@ -449,8 +568,8 @@ function stepFork(P){
         <dt>Sticky anchor</dt><dd>${st.sticky}${P.anchor !== st.sticky ? ' <span class="pill warn">portfolio is not on the sticky anchor</span>' : ""}</dd>
       </dl>` : ""}
       ${rf}
-      ${lost.length ? `<div class="note warn"><b>Lost on this re-fork:</b> ${lost.map(([g, r]) => `${esc(g)} ${esc(r)}`).join(", ")}. The group left the baseline, so its view is gone. Re-express it on another group in the Book step if it still holds.</div>` : ""}
-      <p style="font-size:13px;color:var(--ink-2)">Forking copies the baseline grid into <span class="mono">input/</span> and rebuilds the book. You never edit weights directly: every change after this point is a group rating, a multiplier or a choice of names.</p>
+      ${lost.length ? `<div class="note warn"><b>Lost on this re-fork:</b> ${lost.map(([g, r]) => `${esc(g)} ${esc(r)}`).join(", ")}. The group left the baseline, so its view and its pp are gone and the net no longer sums to 0. Re-express it on another group in the Book step.</div>` : ""}
+      <p style="font-size:13px;color:var(--ink-2)">Forking copies the baseline grid into <span class="mono">input/</span> and rebuilds the book. You never edit weights directly: every change after this point is a group rating, its active pp or a choice of names.</p>
     </div></section>`;
 }
 function stepScreen(P){
@@ -461,6 +580,7 @@ function stepScreen(P){
   const minFc = Object.entries(u.FC).sort((a,b)=>a[1]-b[1])[0];
   const hits = P.exclusions;
   const picks = [...new Set(hits.map(x => x.ticker))];
+  const held = [...new Set(hits.filter(x => x.in_book !== "no").map(x => x.ticker))];
   return `<section class="panel"><div class="panel-h"><h2>Screens</h2><span class="label">data/params/${P.anchor}.csv · suggest only</span></div>
     <div class="panel-b" style="display:flex;flex-direction:column;gap:14px">
       <div class="scroll"><table>
@@ -478,30 +598,68 @@ function stepScreen(P){
         </tbody></table></div>
       <div class="inline"><button class="btn primary" id="scRun">Save screens and run</button><span style="font-size:12.5px;color:var(--ink-3)">Writes the screens into statement.json and rewrites screen/exclusions.csv. Nothing leaves the book until you invalidate.</span></div>
     </div>
-    <div class="panel-h" style="border-top:1px solid var(--line)"><h3>Suggested <span class="num" style="color:var(--ink-3)">${picks.length}</span></h3>
-      <div class="inline"><button class="btn" id="scPickAll" ${hits.length?"":"disabled"}>Select all</button><button class="btn primary" id="scApply" ${P.screenPicks.size?"":"disabled"}>Invalidate ${P.screenPicks.size||""}</button></div></div>
-    ${hits.length ? `<div class="scroll"><table><thead><tr><th></th><th>Ticker</th><th>Group</th><th>Screen</th><th class="n">Value</th><th class="n">Threshold</th></tr></thead><tbody>
-      ${hits.map((x, i) => `<tr><td><input type="checkbox" data-pick="${esc(x.ticker)}" id="pick_${i}" ${P.screenPicks.has(x.ticker)?"checked":""} aria-label="Invalidate ${esc(x.ticker)}"></td><td class="mono">${esc(x.ticker)}</td><td>${esc(x.group)}</td><td class="mono">${esc(x.screen)}</td><td class="n">${x.value === "" ? "no 21-session history" : (+x.value).toPrecision(4)}</td><td class="n">&lt; ${esc(x.threshold)}</td></tr>`).join("")}
-      </tbody></table></div>` : `<div class="panel-b"><p style="color:var(--ink-3);font-size:13px">${Object.values(sc).some(v=>v.on) ? "No investable name fails the screens, or they have not been run." : "Turn a screen on and run it to see suggestions."}</p></div>`}
+    <div class="panel-h" style="border-top:1px solid var(--line)"><h3>Suggested <span class="num" style="color:var(--ink-3)">${picks.length}</span>${picks.length ? `<span class="label" style="margin-left:8px">${held.length} in the book, ${picks.length - held.length} already out</span>` : ""}</h3>
+      <div class="inline"><button class="btn" id="scPickAll" ${held.length?"":"disabled"}>Select the ${held.length||""} in the book</button><button class="btn primary" id="scApply" ${P.screenPicks.size?"":"disabled"}>Invalidate ${P.screenPicks.size||""}</button></div></div>
+    ${hits.length ? `<div class="scroll"><table><thead><tr><th></th><th>Ticker</th><th>Group</th><th>In book</th><th>Screen</th><th class="n">Value</th><th class="n">Threshold</th></tr></thead><tbody>
+      ${hits.map((x, i) => `<tr${x.in_book === "no" ? ` class="out"` : ""}><td><input type="checkbox" data-pick="${esc(x.ticker)}" id="pick_${i}" ${P.screenPicks.has(x.ticker)?"checked":""} aria-label="Invalidate ${esc(x.ticker)}"></td><td class="mono">${esc(x.ticker)}</td><td>${esc(x.group)}</td><td>${x.in_book === "no" ? `<span class="pill off xs">deleted</span>` : `<span class="pill ok xs">yes</span>`}</td><td class="mono">${esc(x.screen)}</td><td class="n">${x.value === "" ? "no 21-session history" : (+x.value).toPrecision(4)}</td><td class="n">&lt; ${esc(x.threshold)}</td></tr>`).join("")}
+      </tbody></table></div>
+      <div class="panel-b"><p style="color:var(--ink-3);font-size:12.5px">Every name of the anchor universe is screened, not just the book. A row marked deleted is already out of the book; invalidating it only bars it from coming back.</p></div>` : `<div class="panel-b"><p style="color:var(--ink-3);font-size:13px">${Object.values(sc).some(v=>v.on) ? "No name in the anchor universe fails the screens, or they have not been run." : "Turn a screen on and run it to see suggestions."}</p></div>`}
     <div class="panel-h" style="border-top:1px solid var(--line)"><h3>Invalidated <span class="num" style="color:var(--ink-3)">${P.invalid.size}</span></h3><span class="label">stays in the book universe, cannot be made investable</span></div>
     <div class="panel-b">${P.invalid.size ? `<div class="chips">${[...P.invalid].sort().map(t => `<span class="chip inv" style="cursor:default">${esc(t)}<button class="x" data-restore="${esc(t)}" title="Restore ${esc(t)}" aria-label="Restore ${esc(t)}">×</button></span>`).join("")}</div>
       <p class="hint" style="font-size:12px;color:var(--ink-3);margin-top:8px">Restoring does not put a name back in the book; add it in the Book step.</p>` : `<p style="color:var(--ink-3);font-size:13px">None.</p>`}</div>
   </section>`;
 }
 function chip(P, t, cls, extra=""){ return `<span class="chip ${cls}" draggable="${cls.includes("inv")||cls.includes("in ")||cls.includes("claimed")?"false":"true"}" data-t="${esc(t)}" title="${esc(P.u.co[t]||t)}">${esc(t)}${extra}</span>`; }
+/* Rating control: a NO on/off button (the only red) and, while NO is off, the
+   UW3-OW3 spectrum. Clicking a cell sets the rating and lights every cell
+   between AV and it; the rest stay grey. The active pp input follows, bounded
+   to the tier and, from the last preview, the floor (-neutral). */
+function ppBounds(r, x){
+  const [lo, hi] = tierRange(r);
+  return [x && lo < 0 ? Math.max(lo, -Math.floor(x.neutral * 10000) / 100) : lo, hi];
+}
+function rateControl(key, attr, bk, x, opts, disabled){
+  const isNo = bk.rating === "NO";
+  const locked = (opts.no && isNo) || disabled;
+  const [lo, hi] = ppBounds(bk.rating, x);
+  const tiered = /\d$/.test(bk.rating);
+  const cells = SPEC.map(([r, bg, ink]) => {
+    const sel = bk.rating === r;
+    const lit = !locked && (sel || inBand(bk.rating, r));
+    const tip = r === "AV" ? "AV · 0 pp"
+      : `${r} · ${r[0] === "U" ? "down to −" : "up to +"}${TIER[r[2]]} pp`;
+    return `<button class="cell${sel ? " sel" : ""}" ${attr}="${esc(key)}" data-rate="${r}"${lit ? ` style="background:${bg};color:${ink}"` : ""} aria-pressed="${sel}" ${locked ? "disabled" : ""} title="${tip}" aria-label="${r}">${r === "AV" ? "AV" : r[2]}</button>`;
+  }).join("");
+  return `${opts.no ? `<button class="nobtn${isNo ? " on" : ""}" ${attr}="${esc(key)}" data-no="1" aria-pressed="${isNo}" title="Out of scope: no weight, no active pp">NO</button>` : ""}
+    <div class="spec" role="group" aria-label="Rating for ${esc(key)}">${cells}</div>
+    ${locked && !isNo ? `<div class="gmeta">no investable name</div>` : ""}
+    ${!locked && tiered ? `<div class="inline" style="gap:6px"><input class="mult" type="number" step="0.25" min="${lo}" max="${hi}" ${attr}="${esc(key)}" data-pp="1" value="${bk.pp}" aria-label="Active pp for ${esc(key)}"><span class="gmeta">${bk.rating} · range ${fpp(lo)} to ${fpp(hi)} pp</span></div>` : ""}`;
+}
+function actBar(P){
+  const a = activeSums(P); const r = S.preview;
+  const faults = r?.ok ? r.active.faults.filter(f => !f.startsWith("active pp")) : [];
+  const fill = Math.min(1, a.used / a.budget);
+  return `<div class="panel-b actbar">
+      <span class="pill ${a.netOk ? "ok" : "bad"}" title="Overweights are funded by underweights: the active pp must sum to 0">Net ${fpp(a.net)} pp</span>
+      <span class="inline" style="gap:8px"><span class="label">Budget</span><div class="bar" style="min-width:140px" aria-hidden="true"><div class="t" style="width:${fill*100}%;background:var(--${a.budgetOk ? "accent" : "uw"})"></div></div>
+        <span class="num ${a.budgetOk ? "" : "err"}">${a.used.toFixed(2)} / ${a.budget} pp</span></span>
+      <span class="inline" style="gap:6px"><button class="btn sm" id="balance" ${a.netOk ? "disabled" : ""} title="Scale the larger side (OW or UW) down until the net is 0">Balance to zero</button>${P.undoPP ? '<button class="btn sm ghost" id="undoBalance">Undo</button>' : ""}</span>
+      ${faults.length ? `<p class="note bad" style="flex-basis:100%;white-space:pre-wrap">${faults.map(esc).join("\n")}</p>` : ""}
+    </div>`;
+}
+const bookOk = P => { const a = activeSums(P); return a.netOk && a.budgetOk; };
 function stepBook(P){
   if (!ready(P)) return `<section class="panel"><div class="panel-b"><p style="color:var(--ink-3)">Fork a baseline first.</p></div></section>`;
   const u = P.u; const c = claims(P); const r = S.preview;
   const byG = r?.ok ? Object.fromEntries(r.rows.map(x=>[x.group,x])) : {};
   const groups = u.groups.map(g => { const bk = P.book[g.name]; const x = byG[g.name]; const surv = survivors(P, g);
     const inc = g.members.filter(m => bk.included.has(m.t));
-    const d = x ? x.w - g.weight : 0;
     return `<div class="grp ${bk.rating==="NO"?"isno":""}" data-g="${esc(g.name)}">
       <div class="gside">
-        <div class="gname" title="${esc(g.name)}">${esc(g.name)}</div>
-        <div class="rate" role="group" aria-label="Rating for ${esc(g.name)}">${["NO","UW","AV","OW"].map(k => `<button data-g="${esc(g.name)}" data-r="${k}" aria-pressed="${bk.rating===k}" ${!surv.length && k!=="NO" ? "disabled title=\"No investable name\"" : ""}>${k}</button>`).join("")}</div>
-        <div class="inline" style="gap:6px"><span class="gmeta">×</span><input class="mult" type="number" step="0.05" min="0" id="m_${id(g.name)}" data-mg="${esc(g.name)}" placeholder="${DEF[bk.rating].toFixed(2)}" value="${bk.mult ?? ""}" ${bk.rating==="NO"?"disabled":""} aria-label="Multiplier override for ${esc(g.name)}">${bk.autoNo ? '<span class="pill xs off plain">auto NO</span>' : ""}</div>
-        <div class="gmeta">base ${pct(g.weight,1)} → <b style="color:var(--ink)">${x ? pct(x.w,1) : "–"}</b> ${x ? `<span class="delta ${d>0.0005?"up":d<-0.0005?"dn":""}">${d>=0?"+":""}${(d*100).toFixed(1)}</span>` : ""}${x?.capped ? ' <span class="pill xs warn plain">cap</span>' : ""}</div>
+        <div class="gname" title="${esc(g.name)}">${esc(g.name)}${bk.autoNo ? ' <span class="pill xs off plain">auto NO</span>' : ""}</div>
+        ${rateControl(g.name, "data-g", bk, x, {no:true}, !surv.length)}
+        <div class="gmeta">${bk.rating === "NO" ? `base ${pct(g.weight,1)} · out of scope` : x ? `neutral ${pct(x.neutral,1)} → <b style="color:var(--ink)">${pct(x.w,1)}</b> <span class="delta ${x.vs_neutral>0.05?"up":x.vs_neutral<-0.05?"dn":""}">${fpp(x.vs_neutral,1)}</span>` : "–"}${x?.capped ? ' <span class="pill xs warn plain">cap</span>' : ""}</div>
+        ${bk.rating === "NO" ? "" : (cov => cov ? `<div class="gmeta cover${cov.cover < COVER_THIN ? " thin" : ""}" title="The group's neutral is its float-cap weight in the benchmark. Names you deleted still support it, so the ones you kept carry their share.">cover ${pct(cov.cover,0)} · ${cov.kept} of ${cov.of} names${cov.topw !== null ? ` · ${esc(cov.top)} ${pct(cov.topw,1)} of the book` : ""}</div>` : "")(coverage(P, g, x))}
       </div>
       <div class="gboxes">
         <div class="zone zone-all" data-g="${esc(g.name)}">
@@ -517,8 +675,8 @@ function stepBook(P){
   const tac = P.tac.groups.map((tg, i) => { const x = byG[tg.name]; return `<div class="tacg" data-tg="${i}">
       <div class="gside">
         <div class="inline" style="gap:6px"><input type="text" value="${esc(tg.name)}" id="tgname_${i}" data-tgname="${i}" aria-label="Tactical group name" style="padding:3px 6px;font-weight:600"><button class="btn sm ghost" data-tgdel="${i}" aria-label="Delete tactical group">×</button></div>
-        <div class="rate" role="group"><span class="chip tac" style="cursor:default;font-size:10.5px">tactical</span>${["UW","AV","OW"].map(k => `<button data-tg="${i}" data-r="${k}" aria-pressed="${tg.rating===k}" ${tg.tickers.length ? "" : "disabled"}>${k}</button>`).join("")}</div>
-        <div class="inline" style="gap:6px"><span class="gmeta">×</span><input class="mult" type="number" step="0.05" min="0" id="tgm_${i}" data-tgm="${i}" placeholder="${DEF[tg.rating].toFixed(2)}" value="${tg.mult ?? ""}" ${tg.rating==="NO"?"disabled":""} aria-label="Multiplier">${tg.rating==="NO" ? '<span class="pill xs off plain">NO until it claims</span>' : ""}</div>
+        <div class="inline" style="gap:6px"><span class="chip tac" style="cursor:default;font-size:10.5px">tactical</span>${tg.rating==="NO" ? '<span class="pill xs off plain">NO until it claims</span>' : ""}</div>
+        ${rateControl(String(i), "data-tg", tg, P.tac.on ? x : null, {no:false}, !tg.tickers.length)}
         <div class="gmeta">budget ${pct(tg.tickers.reduce((a,t)=>a+u.FC[t],0)/u.groups.reduce((a,g)=>a+g.members.reduce((b,m)=>b+m.fcap,0),0),2)} → <b style="color:var(--ink)">${P.tac.on && x ? pct(x.w,1) : "off"}</b></div>
       </div>
       <div class="zone zone-tac" data-tg="${i}">
@@ -532,10 +690,11 @@ function stepBook(P){
       </div>
     </div>`; }).join("");
   return `<section class="panel"><div class="panel-h"><h2>Book</h2>
-      <div class="legend"><span><i style="background:var(--ow)"></i>OW 1.25</span><span><i style="background:var(--av)"></i>AV 1.00</span><span><i style="background:var(--uw)"></i>UW 0.75</span><span><i style="background:var(--no)"></i>NO 0</span><span>Drag a name into Investable to include it. An empty box is NO.</span></div>
+      <div class="legend"><span class="specleg" aria-hidden="true">${SPEC.map(([, bg]) => `<i style="background:${bg}"></i>`).join("")}</span><span>UW3 → OW3, tiers up to ∓3 / ∓6 / ∓9 pp; AV is 0</span><span><i style="background:#E53935"></i>NO out of scope</span><span>Drag a name into Investable to include it. An empty box is NO.</span></div>
       <div class="inline"><button class="btn sm" id="addAllG">Add all groups</button><button class="btn sm" id="rmAllG">Remove all groups</button></div></div>
+    ${actBar(P)}
     ${groups}
-    <div class="panel-b"><p class="note">Removing a name keeps its group's budget; the survivors absorb it by float cap. Struck-through names are invalidated by a screen. A blank multiplier uses the rating default.</p></div>
+    <div class="panel-b"><p class="note">Each group starts at its neutral weight: its float-cap share of the groups not rated NO. Active pp move it from there, no further than the tier allows and never below 0%. Overweights are funded by underweights, so the pp must net to 0 within the budget (Constraints step). Removing a name keeps its group's budget; the survivors absorb it by float cap. Struck-through names are invalidated by a screen.</p></div>
   </section>
   <section class="panel"><div class="panel-h"><h2>Tactical overlay</h2><label class="toggle"><input type="checkbox" id="tac_on" ${P.tac.on?"checked":""}> ${P.tac.on?"On":"Off"}</label></div>
     <div class="panel-b" style="display:flex;flex-direction:column;gap:12px;${P.tac.on?"":"opacity:.6"}">
@@ -543,7 +702,7 @@ function stepBook(P){
       <div class="inline"><input type="text" id="tacNew" placeholder="New tactical group name" style="width:260px"><button class="btn" id="tacAdd">Add tactical group</button>
         <span style="font-size:12.5px;color:var(--ink-3)">${P.tac.on ? "Switching off releases every claim back to its home group." : "Claims are kept but inert while the overlay is off."}</span></div>
     </div>
-    <div class="panel-f"><button class="btn" id="discardBook" ${P.dirty.book?"":"disabled"}>Discard</button><button class="btn primary" id="saveBook" ${P.dirty.book?"":"disabled"}>Save book and overlay</button></div>
+    <div class="panel-f">${P.dirty.book && !bookOk(P) ? '<span class="err">Balance the net to 0 within the budget to save.</span>' : ""}<button class="btn" id="discardBook" ${P.dirty.book?"":"disabled"}>Discard</button><button class="btn primary" id="saveBook" ${P.dirty.book && bookOk(P)?"":"disabled"}>Save book and overlay</button></div>
   </section>`;
 }
 function capOf(P, g){ const s = P.cons.sector; return s.mode === "individual" ? (s.per[g] ?? s.max) : s.max; }
@@ -577,8 +736,13 @@ function stepConstraints(P){
       <div class="inline"><label for="uc_t" style="font-size:12.5px;color:var(--ink-2)">A name is large above</label><input class="small-in" type="number" id="uc_t" min="0.5" max="50" step="0.5" value="${+(cs.large.T*100).toFixed(2)}"><span class="mono">%</span>
         <label for="uc_l" style="font-size:12.5px;color:var(--ink-2);margin-left:12px">Large names together at most</label><input class="small-in" type="number" id="uc_l" min="1" max="100" step="1" value="${+(cs.large.L*100).toFixed(2)}"><span class="mono">%</span></div>
       <p class="desc">Large names are scaled down pro-rata to the aggregate cap; a name that would fall under the threshold stops there. The excess pours into names below the threshold, each stopping at the threshold, so no name ever crosses it and the large set only shrinks. Feasible when L + T × small names ≥ 100%.</p>`);
-  return `<section class="panel"><div class="panel-h"><h2>Constraints</h2><span class="label">constraints.json · applied after the tilt</span></div>
-    <div class="panel-b cons">${sector}${stock}${large}</div>
+  const a = activeSums(P);
+  const budget = `<div class="con on">
+      <label for="act_b" class="check" style="cursor:default">Active budget</label><span class="desc" style="text-align:right">always on · group grain</span>
+      <div class="body"><div class="inline"><label for="act_b" style="font-size:12.5px;color:var(--ink-2)">Half the sum of |active pp| at most</label><input class="small-in" type="number" id="act_b" min="0.5" max="100" step="0.5" value="${cs.active.budget}"><span class="mono">pp</span></div>
+      <p class="desc">The book uses ${a.used.toFixed(2)} pp now${a.budgetOk ? "" : ", over the budget: lower the tilts in the Book step or raise this"}. Default 20.</p></div></div>`;
+  return `<section class="panel"><div class="panel-h"><h2>Constraints</h2><span class="label">constraints.json · caps apply after the tilt</span></div>
+    <div class="panel-b cons">${budget}${sector}${stock}${large}</div>
     <div class="panel-h" style="border-top:1px solid var(--line)"><h3>Status</h3></div>
     ${statusTable(P)}
     ${r && !r.ok ? `<div class="panel-b"><p class="note bad" style="white-space:pre-wrap">${esc(r.error)}</p></div>` : ""}
@@ -591,23 +755,26 @@ function stepTarget(P){
   if (!r) return `<section class="panel"><div class="panel-b"><p style="color:var(--ink-3)">Computing...</p></div></section>`;
   const summ = S.state.portfolios.find(p => p.name === P.name);
   const dirty = P.dirty.book || P.dirty.cons;
-  const buildBtn = `<button class="btn primary" id="build" ${!r.ok ? "disabled" : ""}>${dirty ? "Save and build" : "Build target"}</button>`;
+  const faults = r.ok ? r.active.faults : [];
+  const buildBtn = `<button class="btn primary" id="build" ${!r.ok || faults.length ? "disabled" : ""}>${dirty ? "Save and build" : "Build target"}</button>`;
   if (!r.ok) return `<section class="panel"><div class="panel-h"><h2>Target allocation</h2><span class="inline"><span class="pill bad">Blocked</span>${buildBtn}</span></div><div class="panel-b"><p class="err" style="white-space:pre-wrap">${esc(r.error)}</p></div></section>`;
   const st = P.statement; const n = r.n; const u = P.u; const cs = P.cons;
-  const maxW = Math.max(...r.rows.map(x=>Math.max(x.w, x.base)));
+  const maxW = Math.max(...r.rows.map(x=>Math.max(x.w, x.neutral)));
   return `<section class="panel"><div class="panel-h"><h2>Target allocation</h2>
       <div class="inline">${dirty ? `<span class="pill warn">Preview includes unsaved edits</span>` : summ?.built_at ? `<span class="pill ok">Last built ${esc(summ.built_at)}</span>` : `<span class="pill off">Never built</span>`}${buildBtn}</div></div>
     ${dirty ? `<div class="panel-b" style="padding-bottom:0"><p class="note warn">The build reads the files on disk. Save and build writes the ${[P.dirty.book && "Book", P.dirty.cons && "Constraints"].filter(Boolean).join(" and ")} edits first, then builds.</p></div>` : ""}
+    ${faults.length ? `<div class="panel-b" style="padding-bottom:0"><p class="note bad" style="white-space:pre-wrap"><b>Blocked: the active weights break the book rules.</b> The weights below are a preview with each group floored at 0%.\n${faults.map(esc).join("\n")}</p></div>` : ""}
     ${r.in_range === false && st ? `<div class="panel-b" style="padding-bottom:0"><p class="note warn"><b>${n} holdings is outside ${st.holdings.min}–${st.holdings.max}.</b> ${n < st.holdings.min ? "Add names to investable boxes or rate more groups above NO." : "Remove names or rate groups NO in the Book step."} The build still runs; the flag is a warning.</p></div>` : ""}
     ${r.messages.length ? `<div class="panel-b" style="padding-bottom:0"><div class="console" style="border-radius:6px;border:0">${logHtml(r.messages.join("\n"))}</div></div>` : ""}
     <div class="scroll"><table>
-      <thead><tr><th>Group</th><th>Rating</th><th class="n">Names</th><th class="n">Base</th><th class="n">Tilted</th><th class="n">Target</th><th style="width:26%">Base <span style="font-weight:400">|</span> target</th></tr></thead>
+      <thead><tr><th>Group</th><th>Rating</th><th class="n">Names</th><th class="n">Base</th><th class="n">Neutral</th>${r.rows.some(x => Math.abs(x.unc - x.w) > 1e-9) ? '<th class="n">Tilted</th>' : ""}<th class="n">Target</th><th class="n">vs neutral</th><th class="n">vs base</th><th style="width:22%">Neutral <span style="font-weight:400">|</span> target</th></tr></thead>
       <tbody>${r.rows.filter(x=>x.w>0).map(x => `<tr><td>${esc(x.group)}${x.kind==="tactical"?' <span class="pill plain off xs">tactical</span>':""}${x.capped?' <span class="pill plain warn xs">capped</span>':""}${x.full?' <span class="pill plain warn xs">full</span>':""}</td>
-        <td><span class="mono" style="color:var(--${x.rating.toLowerCase()});font-weight:500">${x.rating}</span> <span class="mono" style="color:var(--ink-3);font-size:12px">×${x.m.toFixed(2)}</span></td>
-        <td class="n">${x.n}/${x.n_all}</td><td class="n">${pct(x.base)}</td><td class="n" style="color:var(--ink-3)">${pct(x.unc)}</td><td class="n"><b>${pct(x.w)}</b></td>
-        <td><div class="bar"><div class="t" style="width:${x.w/maxW*100}%;background:var(--${x.rating.toLowerCase()})"></div><div class="b" style="width:${x.base/maxW*100}%"></div>${cs.sector.on ? `<div class="c" style="left:${Math.min(1, capOf(P, x.group)/maxW)*100}%"></div>` : ""}</div></td></tr>`).join("")}
+        <td><span class="mono" style="color:var(--${side(x.rating)});font-weight:500">${x.rating}</span> <span class="mono" style="color:var(--ink-3);font-size:12px">${fpp(x.pp)}</span></td>
+        <td class="n">${x.n}/${x.n_all}</td><td class="n">${pct(x.base)}</td><td class="n">${pct(x.neutral)}</td>${r.rows.some(y => Math.abs(y.unc - y.w) > 1e-9) ? `<td class="n" style="color:var(--ink-3)">${pct(x.unc)}</td>` : ""}<td class="n"><b>${pct(x.w)}</b></td>
+        <td class="n ${x.vs_neutral > 0.005 ? "pos" : x.vs_neutral < -0.005 ? "negv" : ""}">${fpp(x.vs_neutral)}</td><td class="n" style="color:var(--ink-3)">${fpp((x.w - x.base) * 100)}</td>
+        <td><div class="bar"><div class="t" style="width:${x.w/maxW*100}%;background:var(--${side(x.rating)})"></div><div class="b" style="width:${x.neutral/maxW*100}%"></div>${cs.sector.on ? `<div class="c" style="left:${Math.min(1, capOf(P, x.group)/maxW)*100}%"></div>` : ""}</div></td></tr>`).join("")}
       </tbody></table></div>
-    <div class="panel-b" style="padding-block:6px 10px"><span style="font-size:12px;color:var(--ink-3)">${r.rows.filter(x=>x.w===0).length} groups at 0 (NO). Bar is the target, grey tick the baseline weight${cs.sector.on ? ", dashed line the cap" : ""}. ${esc(r.tac_note)}</span></div>
+    <div class="panel-b" style="padding-block:6px 10px"><span style="font-size:12px;color:var(--ink-3)">${r.rows.filter(x=>x.w===0).length} groups at 0. Active ${fpp(r.active.net_pp)} pp net, ${r.active.used_pp.toFixed(2)} of ${r.active.budget_pp} pp budget. vs neutral and vs base are pp after the caps; base is the universe float cap, the nearest proxy for VNINDEX. Bar is the target, grey tick the neutral${cs.sector.on ? ", dashed line the cap" : ""}. ${esc(r.tac_note)}</span></div>
     </section>
     <section class="panel"><div class="panel-h"><h2>Constraints in force</h2></div>${statusTable(P)}</section>
     <section class="panel"><div class="panel-h"><h2>Holdings <span class="num" style="color:var(--ink-3)">${n}</span></h2><span class="label">target/holdings.csv</span></div>
@@ -703,6 +870,7 @@ function bindDrag(P){
 /* ---------- saving ---------- */
 async function saveBook(){
   const P = S.P;
+  if (!bookOk(P)){ const a = activeSums(P); S.console.flow = `FAIL  book not saved: active pp net ${fpp(a.net)}, ${a.used.toFixed(2)} of ${a.budget} pp budget; balance the net to 0 within the budget\n`; render(); return false; }
   const res = await action("flow", "PUT", `/api/p/${encodeURIComponent(P.name)}/book`, {...bookSpec(P), version:P.versions.book});
   if (res?.ok){ P.dirty.book = false; await afterSave(); }
   return res?.ok;
@@ -740,27 +908,31 @@ function bindFlow(){
     const after = async () => { P.screenPicks.clear(); await Promise.all([loadPortfolio(), refreshState()]); };
     $("#scRun").onclick = () => action("flow", "POST", `/api/p/${name}/screen`, {screens:screens()}, after);
     $$("[data-pick]").forEach(c => c.onchange = () => { c.checked ? P.screenPicks.add(c.dataset.pick) : P.screenPicks.delete(c.dataset.pick); render(); });
-    if ($("#scPickAll")) $("#scPickAll").onclick = () => { P.exclusions.forEach(x => P.screenPicks.add(x.ticker)); render(); };
+    if ($("#scPickAll")) $("#scPickAll").onclick = () => { P.exclusions.filter(x => x.in_book !== "no").forEach(x => P.screenPicks.add(x.ticker)); render(); };
     $("#scApply").onclick = () => action("flow", "POST", `/api/p/${name}/screen`, {invalidate:[...P.screenPicks]}, after);
     $$("[data-restore]").forEach(b => b.onclick = () => action("flow", "POST", `/api/p/${name}/screen`, {restore:[b.dataset.restore]}, after));
   }
   if (k === "book" && ready(P)){
     const u = P.u;
-    $$(".grp .rate button").forEach(b => b.onclick = () => { const bk = P.book[b.dataset.g]; bk.rating = b.dataset.r; bk.autoNo = false; if (bk.rating==="NO") bk.mult = null; edited("book"); });
-    $$("[data-mg]").forEach(i => i.onchange = () => { P.book[i.dataset.mg].mult = i.value === "" ? null : Math.max(0, +i.value); edited("book"); });
+    /* NO toggle, spectrum and pp: the same markup for book groups (data-g) and tactical groups (data-tg) */
+    const rowOf = el => el.dataset.g !== undefined ? P.book[el.dataset.g] : P.tac.groups[+el.dataset.tg];
+    $$("[data-no]").forEach(b => b.onclick = () => { const bk = rowOf(b); setRating(bk, bk.rating === "NO" ? "AV" : "NO"); edited("book"); });
+    $$("[data-rate]").forEach(b => b.onclick = () => { const bk = rowOf(b); setRating(bk, b.dataset.rate); edited("book"); });
+    $$("[data-pp]").forEach(i => i.onchange = () => { const bk = rowOf(i); const v = +i.value;
+      bk.pp = Number.isFinite(v) && i.value !== "" ? Math.round(Math.min(+i.max, Math.max(+i.min, v)) * 100) / 100 : 0; edited("book"); });
+    if ($("#balance")) $("#balance").onclick = () => { balance(P); edited("book", true); };
+    if ($("#undoBalance")) $("#undoBalance").onclick = () => { P.undoPP.forEach(([b, v]) => { b.pp = v; }); edited("book"); };
     $$("[data-addall]").forEach(b => b.onclick = () => { const g = u.byName[b.dataset.addall]; g.members.forEach(m => { if (!P.invalid.has(m.t)) P.book[g.name].included.add(m.t); }); edited("book"); });
     $$("[data-rmall]").forEach(b => b.onclick = () => { P.book[b.dataset.rmall].included.clear(); edited("book"); });
     $$("[data-rm]").forEach(b => b.onclick = () => { P.book[u.HOME[b.dataset.rm]].included.delete(b.dataset.rm); edited("book"); });
     $("#addAllG").onclick = () => { u.groups.forEach(g => g.members.forEach(m => { if (!P.invalid.has(m.t)) P.book[g.name].included.add(m.t); })); edited("book"); };
     $("#rmAllG").onclick = () => { u.groups.forEach(g => P.book[g.name].included.clear()); edited("book"); };
     $("#tac_on").onchange = e => { P.tac.on = e.target.checked; edited("book"); };
-    $("#tacAdd").onclick = () => { const nm = $("#tacNew").value.trim(); if (!nm || P.tac.groups.some(g=>g.name===nm) || u.byName[nm]) return; P.tac.groups.push({name:nm, rating:"NO", mult:null, tickers:[], autoNo:true}); edited("book"); };
+    $("#tacAdd").onclick = () => { const nm = $("#tacNew").value.trim(); if (!nm || P.tac.groups.some(g=>g.name===nm) || u.byName[nm]) return; P.tac.groups.push({name:nm, rating:"NO", pp:0, tickers:[], autoNo:true}); edited("book"); };
     $$("[data-tgname]").forEach(i => i.onchange = () => { const nm = i.value.trim(); const j = +i.dataset.tgname;
       if (nm && !u.byName[nm] && !P.tac.groups.some((g, x) => x !== j && g.name === nm)){ const old = P.tac.groups[j].name; P.tac.groups[j].name = nm; if (P.cons.sector.per[old] !== undefined){ P.cons.sector.per[nm] = P.cons.sector.per[old]; delete P.cons.sector.per[old]; } }
       edited("book"); });
     $$("[data-tgdel]").forEach(b => b.onclick = () => { P.tac.groups.splice(+b.dataset.tgdel, 1); edited("book"); });
-    $$("[data-tg][data-r]").forEach(b => b.onclick = () => { const tg = P.tac.groups[+b.dataset.tg]; tg.rating = b.dataset.r; tg.autoNo = false; edited("book"); });
-    $$("[data-tgm]").forEach(i => i.onchange = () => { P.tac.groups[+i.dataset.tgm].mult = i.value === "" ? null : Math.max(0, +i.value); edited("book"); });
     $$("[data-unclaim]").forEach(b => b.onclick = () => { P.tac.groups.forEach(g => g.tickers = g.tickers.filter(x => x !== b.dataset.unclaim)); edited("book"); });
     $("#saveBook").onclick = saveBook;
     $("#discardBook").onclick = () => loadPortfolio({discard:true});
@@ -771,6 +943,7 @@ function bindFlow(){
     const cs = P.cons;
     const frac = (v, lo) => Math.min(1, Math.max(lo, +v/100));
     $$("[data-con]").forEach(c => c.onchange = () => { cs[c.dataset.con].on = c.checked; edited("cons"); });
+    $("#act_b").onchange = e => { const v = +e.target.value; cs.active.budget = Number.isFinite(v) && v > 0 ? Math.min(100, v) : cs.active.budget; edited("cons"); };
     $$("[data-capmode]").forEach(b => b.onclick = () => { cs.sector.mode = b.dataset.capmode; edited("cons"); });
     if ($("#cap_v")) $("#cap_v").onchange = e => { cs.sector.max = frac(e.target.value, 0.001); edited("cons"); };
     $$("[data-capg]").forEach(i => i.onchange = () => { cs.sector.per[i.dataset.capg] = frac(i.value, 0.001); edited("cons"); });
@@ -902,7 +1075,7 @@ function renderBacktest(){
         <div class="fig"><span class="label">Max drawdown</span><span class="big negv">${mpct(p.max_drawdown)}</span><span class="sub">${esc(code)} ${mpct(b.max_drawdown)}</span></div>
       </div>
       <div class="panel-h" style="border-top:1px solid var(--line)"><h2>Growth of 100</h2>
-        <div class="bt-key"><span><i></i>${esc(r.name)}</span><span><i class="b"></i>${esc(code)}</span><span><i class="d"></i>calendar fill</span>${reb.drift_threshold != null ? '<span><i class="d w"></i>drift fill</span>' : ""}</div></div>
+        <div class="bt-key"><span><i></i>${esc(r.name)}</span><span><i class="b"></i>${esc(code)}</span><span><i class="d"></i>calendar fill</span>${bs.n_breach ? '<span><i class="d x"></i>breach fill</span>' : ""}${reb.drift_threshold != null ? '<span><i class="d w"></i>drift fill</span>' : ""}</div></div>
       <div class="bt-chart" id="btCw">
         <svg id="btMain" viewBox="0 0 1000 300" role="img" aria-label="Portfolio and benchmark growth of 100">${main}</svg>
         <div class="label" style="padding:6px 8px 0">Excess vs benchmark</div>
@@ -922,14 +1095,14 @@ function renderBacktest(){
       <section class="panel"><div class="panel-h"><h2>Relative and trading</h2></div>
         <div class="scroll"><table class="bt-cmp"><tbody>
         ${kv("Tracking error, annualised", pct(bs.tracking_error))}${kv("Information ratio", n2(bs.information_ratio))}${kv(`Beta to ${esc(code)}`, n2(bs.beta))}
-        ${kv("Rebalances", `${bs.n_calendar} calendar · ${reb.drift_threshold != null ? bs.n_drift + " drift" : "drift off"}`)}
+        ${kv("Rebalances", `${bs.n_calendar} calendar · ${bs.n_breach} breach · ${reb.drift_threshold != null ? bs.n_drift + " drift" : "drift off"}`)}
         ${kv("Turnover after inception, one-way", pct(bs.turnover, 1))}${kv("Trading costs, incl. inception", (bs.cost*1e4).toFixed(1) + " bps")}
         </tbody></table></div></section>
     </div>
     <section class="panel"><div class="panel-h"><h2>Rebalance log</h2><span class="label">decision at the close · fill ${c.lag_sessions} session${c.lag_sessions === 1 ? "" : "s"} later</span></div>
       <div class="scroll"><table><thead><tr><th>Decision</th><th>Fill</th><th>Trigger</th><th class="n">Group drift</th><th class="n">Turnover</th><th class="n">Cost</th><th class="n">Holdings</th><th>Note</th></tr></thead><tbody>
       ${r.rebalances.map(e => `<tr><td class="mono">${e.decision}</td><td class="mono">${e.fill}</td>
-        <td>${e.trigger === "drift" ? '<span class="pill warn">drift</span>' : e.trigger === "calendar" ? '<span class="pill info">calendar</span>' : '<span class="pill off">inception</span>'}</td>
+        <td>${e.trigger === "drift" ? '<span class="pill warn">drift</span>' : e.trigger === "breach" ? '<span class="pill bad" title="a cap broken by more than 10% of its limit">breach</span>' : e.trigger === "calendar" ? '<span class="pill info">calendar</span>' : '<span class="pill off">inception</span>'}</td>
         <td class="n">${e.drift === null ? "—" : pct(e.drift)}</td><td class="n">${pct(e.turnover, 1)}</td><td class="n">${(e.cost*1e4).toFixed(1)} bps</td>
         <td class="n"><span class="pill xs ${e.in_range ? "ok" : "warn"}">${e.holdings} ${e.in_range ? "in" : "OUTSIDE"} ${h.min}–${h.max}</span></td>
         <td>${e.gone ? `<span class="err">no priced name: ${esc(e.gone)}</span>` : ""}</td></tr>`).join("")}
@@ -963,7 +1136,8 @@ function renderBacktest(){
       <section class="panel"><div class="panel-h"><h2>Mandate</h2><span class="pill plain off">statement.json · constraints.json</span></div>
         <div class="panel-b">${mand ? `<dl class="kv bt-mand">
           <dt>Rebalance</dt><dd>${mand.reb.frequency ? `${FREQ[mand.reb.frequency]} (${mand.reb.frequency}), first session of the period` : "No calendar; inception and drift only"}</dd>
-          <dt>Drift threshold</dt><dd>${mand.reb.drift_threshold != null ? `${pct(mand.reb.drift_threshold, 1)} at group grain, ½ Σ |gap|` : "Off"}</dd>
+          <dt>Drift threshold</dt><dd>${mand.reb.drift_threshold != null ? `${pct(mand.reb.drift_threshold, 1)} at group grain, ½ Σ |gap| vs the target re-derived that session` : "Off"}</dd>
+          <dt>Breach</dt><dd>${(t => t != null ? `Any cap that is on, broken by more than ${pct(t, 0)} of its limit` : "Off; a broken cap never forces a trade")(mand.reb.breach_tolerance === undefined ? 0.10 : mand.reb.breach_tolerance)}</dd>
           <dt>Holdings range</dt><dd>${mand.h.min}–${mand.h.max}, flagged per rebalance</dd>
           <dt>Constraints</dt><dd>${esc(mand.cons)}</dd>
           <dt>Tactical overlay</dt><dd>${esc(mand.tac)}</dd>
@@ -985,7 +1159,7 @@ function renderBacktest(){
       <ul class="bt-caveats">
         <li><b>Return basis differs.</b> The portfolio is total return on adjusted prices, cash dividends reinvested on the ex-date. The benchmarks are price indexes, so the portfolio leads them by roughly the dividend yield before any skill.</li>
         <li><b>Today's book, held backwards.</b> Group map, ratings, deleted and invalidated names are as of the anchor and apply to every past date: survivorship and look-ahead bias flatter every level. Read excess and spreads first.</li>
-        <li><b>Rebalances follow the mandate.</b> A scheduled rebalance re-derives budgets from that session's free float × official close and re-solves the constraints; a drift rebalance restores the last target.</li>
+        <li><b>Rebalances follow the mandate.</b> Every rebalance, calendar, breach or drift, re-derives the neutral from that session's free float × official close, adds the book's active pp and re-solves the caps. Drift is measured against that re-derived target. An underweight larger than a past neutral holds the group at 0% (listed in the messages).</li>
         <li><b>Cash until the first fill.</b> The benchmark counts from the start close; the portfolio buys at the close after the fill lag.</li>
       </ul></div></section>
   </div>`;

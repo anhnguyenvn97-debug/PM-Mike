@@ -37,31 +37,28 @@ def root(tmp_path):
     params = pd.DataFrame(rows)
     (tmp_path / "params").mkdir()
     params.to_csv(tmp_path / "params" / f"{ANCHOR}.csv", index=False)
-    publish(tmp_path, params, ANCHOR, sticky=True)
+    publish(tmp_path, params, ANCHOR)
     return tmp_path
 
 
-def publish(root, params, anchor, sticky=False):
-    """Write baseline/<anchor>/ and, if sticky, the root copy backtest.py reads."""
-    port = root / "portfolio" / "baseline"
-    parts = baseline.build(params, anchor)
-    baseline.write(port / str(anchor), *parts)
-    if sticky:
-        baseline.write(port, *parts)
+def publish(root, params, anchor):
+    """Write baseline/<anchor>/."""
+    baseline.write(root / "portfolio" / "baseline" / str(anchor),
+                   *baseline.build(params, anchor))
 
 
 def make(root, name="p", **statement):
     s = default_statement()
     s.update(statement)
     portfolio.new(name, portfolio=root / "portfolio", statement=s)
-    portfolio.fork(name, portfolio=root / "portfolio")
+    portfolio.fork(name, anchor=str(ANCHOR), portfolio=root / "portfolio")
     return root / "portfolio" / name
 
 
 def constrain(home, **blocks):
     c = default_constraints()
     for k, v in blocks.items():
-        c[k] = {**c[k], "on": True, **v}
+        c[k] = {**c[k], **({} if k == "active" else {"on": True}), **v}
     (home / "constraints.json").write_text(json.dumps(c))
 
 
@@ -69,12 +66,13 @@ def holdings(res):
     return dict(zip(res["holdings"].ticker, res["holdings"].target_weight))
 
 
-def edit_book(home, ratings=None, mults=None, blank=()):
+def edit_book(home, ratings=None, pp=None, blank=()):
+    """ratings {group: rating}, pp {group: active pp}; unnamed pp are 0."""
     g = read_grid(home / BOOK)
     for grp, r in (ratings or {}).items():
         j = g[2].index(grp)
         g[1][j] = r
-        g[0][j] = (mults or {}).get(grp, r)
+        g[0][j] = f"{(pp or {}).get(grp, 0):g}"
     cols = [[t for t in grid_column(g, j) if t not in blank] for j in range(len(g[2]))]
     write_grid(home / BOOK, g[:3], cols)
 
@@ -91,38 +89,110 @@ def test_baseline_weights(root):
     alloc = pd.read_csv(root / "portfolio" / "baseline" / str(ANCHOR) / "sector_allocation.csv")
     assert dict(zip(alloc.group, alloc.weight)) == pytest.approx(
         {"G1": 0.6, "G2": 0.3, "G3": 0.1})
-    assert read_grid(root / "portfolio" / "baseline" / GRID)[2] == ["G1", "G2", "G3"]
+    assert read_grid(root / "portfolio" / "baseline" / str(ANCHOR) / GRID)[2] == \
+        ["G1", "G2", "G3"]
 
 
 def test_untilted_target_equals_baseline(root):
-    make(root)
+    home = make(root)
+    assert read_grid(home / BOOK)[:2] == [["0", "0", "0"], ["AV", "AV", "AV"]]
     res = build(root)
     assert weights(res) == pytest.approx({"G1": 0.6, "G2": 0.3, "G3": 0.1})
     h = dict(zip(res["holdings"].ticker, res["holdings"].target_weight))
     assert h["AAA"] == pytest.approx(0.4)
 
 
-def test_tilt_and_deletion(root):
+def test_active_pp_and_deletion(root):
     home = make(root)
-    edit_book(home, ratings={"G1": "OW", "G3": "NO"}, blank=["BBB"])
+    edit_book(home, ratings={"G1": "OW1", "G2": "UW1"}, pp={"G1": 3, "G2": -3},
+              blank=["BBB"])
     res = build(root)
-    # w = b*m / sum(b*m): G1 0.6*1.25=0.75, G2 0.3, G3 0 -> 0.75/1.05, 0.3/1.05
-    assert weights(res) == pytest.approx({"G1": 0.75 / 1.05, "G2": 0.3 / 1.05, "G3": 0})
-    h = dict(zip(res["holdings"].ticker, res["holdings"].target_weight))
-    assert "BBB" not in h and h["AAA"] == pytest.approx(0.75 / 1.05)  # budget stays
+    assert weights(res) == pytest.approx({"G1": 0.63, "G2": 0.27, "G3": 0.1})
+    h = holdings(res)
+    assert "BBB" not in h and h["AAA"] == pytest.approx(0.63)  # budget stays
+    a = res["allocation"].set_index("group")
+    assert a.at["G1", "active_vs_neutral_pp"] == pytest.approx(3)
+    assert a.at["G2", "active_vs_baseline_pp"] == pytest.approx(-3)
+
+
+def test_no_leaves_the_neutral(root):
+    home = make(root)
+    edit_book(home, ratings={"G1": "OW2", "G2": "UW1", "G3": "NO"}, pp={"G1": 3, "G2": -3})
+    res = build(root)
+    # neutral G1 .6/.9, G2 .3/.9; +-3 pp on top
+    assert weights(res) == pytest.approx({"G1": 2 / 3 + 0.03, "G2": 1 / 3 - 0.03, "G3": 0})
+    a = res["allocation"].set_index("group")
+    assert a.at["G1", "neutral_weight"] == pytest.approx(2 / 3)
+    assert a.at["G1", "active_vs_baseline_pp"] == pytest.approx(100 * (2 / 3 + 0.03 - 0.6))
+
+
+def test_active_checks_list_every_fault(root):
+    home = make(root)
+    constrain(home, active={"budget_pp": 5})
+    # G1 OW1 +4 breaks its range, G3 UW3 -12 breaks its range and the floor
+    # (neutral 10%), the net is -8, and 1/2 (4 + 12) = 8 > 5
+    edit_book(home, ratings={"G1": "OW1", "G3": "UW3"}, pp={"G1": 4, "G3": -12})
+    with pytest.raises(BookError) as e:
+        build(root)
+    msg = str(e.value)
+    for part in ("G1: OW1 allows +0 to +3 pp, has +4", "G3: UW3 allows -9 to +0 pp",
+                 "G3: -12 pp takes it below 0%", "net to -8.000", "use 8.00 of a 5 pp"):
+        assert part in msg
+    res = target.compute("p", portfolio=root / "portfolio", params_dir=root / "params",
+                         strict=False)
+    assert len(res["active"]["faults"]) == 5
+    assert weights(res)["G3"] == 0 and "EEE" not in holdings(res)  # floored, renormalised
+    assert weights(res)["G1"] == pytest.approx(0.64 / 0.94)
+
+
+def test_group_at_zero_holds_nothing_and_range_reports_the_floor(root):
+    home = make(root)
+    later = pd.Timestamp("2026-09-12").date()
+    params = pd.read_csv(root / "params" / f"{ANCHOR}.csv")
+    params.loc[params.ticker == "EEE", "float_cap"] = 90 * 0.05 / 0.95    # G3 = 5%
+    params.to_csv(root / "params" / f"{later}.csv", index=False)
+    publish(root, params, later)
+    portfolio.fork("p", anchor=str(later), portfolio=root / "portfolio")
+    edit_book(home, ratings={"G1": "OW2", "G3": "UW2"}, pp={"G1": 5, "G3": -5})
+    res = target.compute("p", portfolio=root / "portfolio", params_dir=root / "params")
+    assert weights(res)["G3"] == 0 and "EEE" not in holdings(res)
+    assert sum(holdings(res).values()) == pytest.approx(1)
+    rng = res["active"]["range"]
+    assert rng["G3"] == pytest.approx((-5, 0)) and rng["G1"] == (0, 6) and rng["G2"] == (0, 0)
+
+
+def test_multiplier_book_fails_with_a_hint(root):
+    home = make(root)
+    g = read_grid(home / BOOK)
+    write_grid(home / BOOK, [["OW", "AV", "AV"], ["OW", "AV", "AV"], g[2]],
+               [grid_column(g, j) for j in range(3)])
+    with pytest.raises(BookError, match="still uses multipliers"):
+        build(root)
+    write_grid(home / BOOK, [["1.25", "0", "0"], ["OW1", "AV", "AV"], g[2]],
+               [grid_column(g, j) for j in range(3)])
+    with pytest.raises(BookError, match=r"net to \+1\.250"):  # an old multiplier as pp
+        build(root)
+    write_grid(home / BOOK, [["x", "0", "0"], ["AV", "AV", "AV"], g[2]],
+               [grid_column(g, j) for j in range(3)])
+    with pytest.raises(BookError, match="'x' is not a number"):
+        build(root)
 
 
 def test_tactical_claim_moves_budget(root):
     home = make(root)
     (home / "tactical_group.json").write_text('{"tactical_group": "yes"}')
-    write_grid(home / "tactical_group.csv", [["AV"], ["AV"], ["T1"]], [["BBB"]])
+    write_grid(home / "tactical_group.csv", [["0"], ["AV"], ["T1"]], [["BBB"]])
     res = build(root)
     assert weights(res) == pytest.approx({"G1": 0.4, "G2": 0.3, "G3": 0.1, "T1": 0.2})
+    write_grid(home / "tactical_group.csv", [["2"], ["OW1"], ["T1"]], [["BBB"]])
+    edit_book(home, ratings={"G2": "UW1"}, pp={"G2": -2})
+    assert weights(build(root)) == pytest.approx({"G1": 0.4, "G2": 0.28, "G3": 0.1, "T1": 0.22})
 
 
 def test_compute_matches_build_and_writes_nothing(root):
     home = make(root)
-    edit_book(home, ratings={"G1": "OW"}, blank=["BBB"])
+    edit_book(home, ratings={"G1": "OW1", "G2": "UW1"}, pp={"G1": 2, "G2": -2},
+              blank=["BBB"])
     constrain(home, stock={"max": 0.5})
     res = target.compute("p", portfolio=root / "portfolio", params_dir=root / "params")
     assert not (home / "target").exists()
@@ -136,8 +206,8 @@ def test_compute_overrides_replace_files(root):
     kw = {"portfolio": root / "portfolio", "params_dir": root / "params"}
     book = read_grid(home / BOOK)
     j = book[2].index("G3")
-    book[0][j] = book[1][j] = "NO"
-    tac = {"on": True, "grid": [["AV"], ["AV"], ["T1"], ["BBB"]]}
+    book[1][j] = "NO"
+    tac = {"on": True, "grid": [["0"], ["AV"], ["T1"], ["BBB"]]}
     cons = {**default_constraints(), "sector": {"on": True, "max": 0.45, "per_group": {}}}
     res = target.compute("p", book=book, tactical=tac, constraints=cons, **kw)
     # G3 NO: G1 .4, G2 .3, T1 .2 over .9 -> G1 .444, G2 .333, T1 .222; no cap binds
@@ -158,11 +228,12 @@ def test_sector_cap_iterates(root):
     assert sorted(res["allocation"].query("capped").group) == ["G1", "G2"]
 
 
-def test_waterfill_matches_legacy_apply_caps():
+def test_waterfill_respreads_until_clean():
     w = {"A": 0.5, "B": 0.3, "C": 0.15, "D": 0.05}
-    legacy, _ = target.apply_caps(w, 0.3)
-    new, _ = target.waterfill(w, dict.fromkeys(w, 0.3))
-    assert new == pytest.approx(legacy)
+    out, bound = target.waterfill(w, dict.fromkeys(w, 0.3))
+    # A clips; .7 over B:C:D lifts B past .3; .4 over C:D gives C .3, D .1
+    assert out == pytest.approx({"A": 0.3, "B": 0.3, "C": 0.3, "D": 0.1})
+    assert bound == {"A", "B"}
 
 
 def test_cap_too_tight_fails(root):
@@ -175,7 +246,7 @@ def test_cap_too_tight_fails(root):
 def test_per_group_cap_applies_to_tactical(root):
     home = make(root)
     (home / "tactical_group.json").write_text('{"tactical_group": "yes"}')
-    write_grid(home / "tactical_group.csv", [["AV"], ["AV"], ["T1"]], [["BBB"]])
+    write_grid(home / "tactical_group.csv", [["0"], ["AV"], ["T1"]], [["BBB"]])
     constrain(home, sector={"max": 1.0, "per_group": {"T1": 0.1}})
     # T1 0.2 -> 0.1; 0.1 spread pro-rata over G1 .4, G2 .3, G3 .1
     assert weights(build(root)) == pytest.approx(
@@ -187,13 +258,6 @@ def test_per_group_unknown_name_fails(root):
     constrain(home, sector={"max": 1.0, "per_group": {"Nope": 0.1}})
     with pytest.raises(BookError, match="names no known group"):
         build(root)
-
-
-def test_legacy_sector_cap_is_not_applied(root, capsys):
-    home = make(root)
-    (home / "sector_cap.json").write_text('{"sector_cap": "yes", "max_weight": 0.4}')
-    assert weights(build(root)) == pytest.approx({"G1": 0.6, "G2": 0.3, "G3": 0.1})
-    assert "read only by backtest.py" in capsys.readouterr().out
 
 
 def test_stock_cap_stays_inside_group(root):
@@ -266,6 +330,8 @@ def test_large_holdings_infeasible(root):
     ({"large": {"on": True, "threshold": 1, "aggregate": 1}}, "fraction"),
     ({"fol": {"on": True}}, "unknown block"),
     ({"stock": {"on": True, "max": 0.1, "min": 0.01}}, "unknown key"),
+    ({"active": {"budget_pp": 0}}, "percentage points"),
+    ({"active": {"budget_pp": 0.2, "on": True}}, "unknown key"),
 ])
 def test_constraints_validation(patch, msg):
     c = default_constraints()
@@ -291,20 +357,24 @@ def test_addition_fails(root):
 
 def test_refork_carries_by_name(root):
     home = make(root)
-    edit_book(home, ratings={"G2": "UW"}, mults={"G2": "0.5"}, blank=["DDD"])
+    edit_book(home, ratings={"G2": "UW1", "G3": "OW1"}, pp={"G2": -2.5, "G3": 2.5},
+              blank=["DDD"])
     # New baseline: G3 disappears, G4 appears, FFF joins G2.
     params = pd.DataFrame([
         {"ticker": t, "group": g, "float_cap": 1.0, "close_raw": 1.0, "adj_factor": 1.0}
         for g, ts in {"G1": ["AAA", "BBB"], "G2": ["CCC", "DDD", "FFF"],
                       "G4": ["EEE"]}.items() for t in ts])
     new_anchor = pd.Timestamp("2026-09-12").date()
+    params.to_csv(root / "params" / f"{new_anchor}.csv", index=False)
     publish(root, params, new_anchor)
     rep = portfolio.fork("p", anchor=str(new_anchor), portfolio=root / "portfolio")
     g = read_grid(home / BOOK)
     j = g[2].index("G2")
-    assert (g[0][j], g[1][j]) == ("0.5", "UW")
+    assert (g[0][j], g[1][j]) == ("-2.5", "UW1")
     assert grid_column(g, j) == ["CCC", "FFF"]  # DDD stays deleted, FFF comes in
-    assert rep["appeared"] == ["G4"] and "G3" in rep["lost"]
+    assert rep["appeared"] == ["G4"] and rep["lost"] == {"G3": "OW1 (2.5 pp)"}
+    with pytest.raises(BookError, match=r"net to -2\.500"):  # G3's +2.5 left with it
+        build(root)
     assert "anchor_date: 2026-09-12" in (home / "input" / "forked_from.txt").read_text()
 
 
@@ -339,6 +409,7 @@ def test_screen_invalidates_restores(root):
 
     excl = portfolio.screen("p", **kw)
     assert excl.ticker.tolist() == ["DDD"]
+    assert excl.in_book.tolist() == ["yes"]
     assert "DDD" in live()
     portfolio.screen("p", invalidate_all=True, **kw)
     assert "DDD" not in live() and read_invalid(home) == ["DDD"]
@@ -356,8 +427,25 @@ def test_screen_invalidates_restores(root):
 
     # re-fork keeps an invalidated name out
     portfolio.screen("p", invalidate=["DDD"], **kw)
-    rep = portfolio.fork("p", portfolio=root / "portfolio")
+    rep = portfolio.fork("p", anchor=str(ANCHOR), portfolio=root / "portfolio")
     assert "DDD" not in live() and rep["invalid_kept_out"] == []
+
+
+def test_screen_covers_the_universe_not_just_the_book(root):
+    s = default_statement()
+    s["screens"]["turnover"] = {"on": True, "min_pct": 0.1}
+    home = make(root, screens=s["screens"])
+    kw = {"portfolio": root / "portfolio", "params_dir": root / "params"}
+    edit_book(home, blank=("DDD",))          # deleted in the Book step, never screened
+
+    excl = portfolio.screen("p", **kw)
+    assert excl.ticker.tolist() == ["DDD"]   # a curated book cannot hide it
+    assert excl.in_book.tolist() == ["no"]
+
+    # invalidating a name already out of the book bars it from coming back
+    portfolio.screen("p", invalidate=["DDD"], **kw)
+    assert read_invalid(home) == ["DDD"]
+    assert portfolio.screen("p", **kw).empty     # and it is not suggested twice
 
 
 def test_invalidating_last_name_rates_group_no(root):
@@ -369,7 +457,7 @@ def test_invalidating_last_name_rates_group_no(root):
                      params_dir=root / "params")
     g = read_grid(home / BOOK)
     j = g[2].index("G3")
-    assert (g[0][j], g[1][j]) == ("NO", "NO")
+    assert (g[0][j], g[1][j]) == ("0", "NO")
     assert weights(build(root))["G3"] == 0
 
 
@@ -380,7 +468,7 @@ def test_tactical_cannot_claim_invalidated(root):
         "ticker,group,screen,value,threshold,invalidated_at\nBBB,G1,turnover,0,0.1,x\n")
     edit_book(home, blank=["BBB"])
     (home / "tactical_group.json").write_text('{"tactical_group": "yes"}')
-    write_grid(home / "tactical_group.csv", [["AV"], ["AV"], ["T1"]], [["BBB"]])
+    write_grid(home / "tactical_group.csv", [["0"], ["AV"], ["T1"]], [["BBB"]])
     with pytest.raises(BookError, match="invalidated names"):
         build(root)
 
@@ -411,6 +499,8 @@ def test_new_refuses_existing_and_bad_names(root):
     ({"rebalance": {"frequency": "1W", "drift_threshold": None}}, "frequency"),
     ({"rebalance": {"frequency": None, "drift_threshold": 8}}, "fraction"),
     ({"rebalance": {"frequency": None, "drift_threshold": None}}, "needs"),
+    ({"rebalance": {"frequency": "1Q", "drift_threshold": None,
+                    "breach_tolerance": 10}}, "breach_tolerance"),
     ({"screens": {"fol": {"on": True}}}, "unknown screen"),
 ])
 def test_statement_validation(patch, msg):
