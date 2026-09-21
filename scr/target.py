@@ -1,28 +1,34 @@
-"""Target: the neutral allocation plus a portfolio's hand-edited active weights.
+"""Target: the neutral allocation plus a portfolio's active weights, on a date.
 
-Reads portfolio/<name>/sector_constituents_custom.csv -- the baseline grid
-with rows 0-1 edited and cells blanked, nothing else:
+Reads portfolio/<name>/book.json, the book spec (portfolio.py docstring): per
+group a rating, an active pp and the investable names, plus the tactical
+overlay. Ratings:
 
-    row 0   active pp    percentage points added to the neutral; blank = 0
-    row 1   rating       NO | UW3 | UW2 | UW1 | AV | OW1 | OW2 | OW3
-    row 2   group names  UNTOUCHED, must match input/sector_constituents.csv
-    row 3+  tickers      DELETE by blanking; no additions, no moves
+    NO | UW3 | UW2 | UW1 | AV | OW1 | OW2 | OW3
 
 NO means out of scope: the group leaves the neutral. A negative view is UW.
 The tier caps how far the active weight may go (D34):
 
     OW1 0..+3   OW2 0..+6   OW3 0..+9   AV 0   UW1 -3..0   UW2 -6..0   UW3 -9..0
 
-Deletion is stock selection, not allocation: the group keeps its budget and
-the surviving names absorb the deleted names' weight by float cap.
+Leaving a name out of a group's investable list is stock selection, not
+allocation: the group keeps its budget and the listed names absorb the others'
+weight by float cap.
 
-Each portfolio sits on its own anchor (input/forked_from.txt) and is priced
-from that anchor's baseline, portfolio/baseline/<anchor>/, and params CSV.
+The date (D57, D60). compute(as_of=d) prices everything on snap(d), the last
+session on or before d ("priced as of" when they differ); the default is the
+latest session. The universe is that session's params (params.at): each
+group's column is every ticker trading in it that day, A-Z. The book is
+evaluated on that universe by portfolio.evaluate (D59): investable names not
+trading are dropped, groups not in the universe are dropped with their pp,
+groups the universe gained are rated NO, and each is reported as a WARN in
+"messages". Then portfolio.normalize_book applies the auto-NO rule (a group
+with no investable name left, a tactical group claiming nothing) and WARNs.
 
-Math, priced from data/params/<portfolio anchor>.csv:
+Math, priced from the session's params:
 
     fcap_i = free_float_i * close_raw_i          params.float_cap
-    b_g    = baseline allocation weight          claims migrated, see below
+    b_g    = sum of fcap over g's column / total claims migrated, see below
     n_g    = b_g / sum_h b_h                     over groups not NO: the neutral
     w_g    = n_g + a_g / 100                     a_g = the group's active pp
     w_i    = w_g * fcap_i / S_g                  S_g = surviving float cap in g
@@ -38,17 +44,18 @@ compute(strict=False) reports the faults in "active" instead of raising and
 weights max(0, w_g) renormalised, so the desk can preview a book mid-edit.
 build() and the backtest engine are strict.
 
-Tactical groups, OFF by default (tactical_group.json switch +
-tactical_group.csv, same 4-row grid, row 2 invented names, row 3+ claims). A
-claimed name leaves its home sector AND takes its float cap along, so the
-neutral moves with it; the budget vector still sums to 1:
+Tactical groups, OFF by default (the spec's "tactical": on, and groups with
+invented names claiming members). A claimed name leaves its home sector AND
+takes its float cap along, so the neutral moves with it; the budget vector
+still sums to 1:
 
-    blank a cell   name leaves, budget STAYS   survivors absorb it
-    claimed        name leaves, budget GOES    b_g shrinks by its float cap
+    not investable  name leaves, budget STAYS   the listed names absorb it
+    claimed         name leaves, budget GOES    b_g shrinks by its float cap
 
-Claims resolve against the BASELINE column, so a name the book deleted is still
-claimed. Leave claimed names in place in the book, or switching the overlay off
-turns them into deletions. Switch off and the .csv is never opened.
+Claims resolve against the session's universe column, so a name left out of
+its group's investable list is still claimed. Keep claimed names investable in
+their home group, or switching the overlay off turns them into exclusions.
+With the overlay off the tactical groups are ignored.
 
 Caps, all OFF by default, constraints.json (schema in common.py). The tilt
 gives group weights u_g; the caps then move weight, never the tilt inputs.
@@ -92,15 +99,13 @@ count is checked against holdings min/max and WARNs outside it. A missing
 statement WARNs; an invalid one FAILs.
 
 Guards, all fatal:
-  - input/sector_constituents.csv differs from baseline/<anchor>/ -> re-fork
-  - book group row differs from input/, or a ticker the baseline column lacks
-  - a live (non-NO) group with every name deleted or claimed away
-  - an invalidated name (screen/invalid.csv) in the book or claimed
-  - unknown rating (a multiplier-grammar book says so), row 0 not a number
+  - a date before the first session; a ticker trading on the session that the
+    group map lacks (params.py)
+  - unknown rating, an active pp that is not a number
   - any active check above
-  - a baseline ticker missing from the params CSV, or params older than baseline
-  - tactical switch yes but csv missing; blank/duplicate group name; name reused
-    from the sectors; ticker claimed twice or outside the universe
+  - tactical overlay on with no groups; blank/duplicate group name; name reused
+    from the groups; ticker claimed twice
+  - every group NO
   - constraints.json invalid, sector.per_group naming no known group, or any
     feasibility check above
 
@@ -117,14 +122,18 @@ Outputs, overwritten in portfolio/<name>/target/:
                             pin = stock_max | at_threshold | large | blank
     built_from.txt          provenance and the constraints in force
 
-compute(name, book=, tactical=, constraints=, strict=) runs everything above
-without writing or printing; each override stands in for its file, so the UI
-previews unsaved edits through the same code. Its "active" holds the net, the
-budget used and each group's allowed pp range after the floor. build() is
-compute() plus the writes.
+compute(name, as_of=, spec=, constraints=, strict=) runs everything above
+without writing or printing; spec and constraints stand in for book.json and
+constraints.json, so the desk previews unsaved edits through the same code.
+Its "active" holds the net, the budget used and each group's allowed pp range
+after the floor; "params" is the session's params frame, "universe" its
+columns, "reconcile" the evaluate() report. build() is compute() plus the
+writes; the desk's Record builds and records in one step, so a build without a
+record is the CLI below.
 
 Usage
-    .venv\\Scripts\\python.exe scr\\target.py hsc_strat_high_growth
+    .venv\\Scripts\\python.exe scr\\target.py energy_focus
+    .venv\\Scripts\\python.exe scr\\target.py energy_focus --as-of 2026-09-01
 """
 import argparse
 import math
@@ -133,29 +142,23 @@ from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
+import params as params_mod
 from common import (
     ALLOC,
     BOOK,
     CAPS,
     CONSTRAINTS,
-    GRID,
-    PARAMS,
+    DB,
     PORTFOLIO,
     STATEMENT,
-    TAC,
-    TAC_SWITCH,
     BookError,
-    grid_column,
     load_constraints,
     load_statement,
-    portfolio_anchor,
-    read_grid,
-    read_invalid,
-    read_switch,
     validate_constraints,
 )
 
-RATINGS = ("NO", "UW3", "UW2", "UW1", "AV", "OW1", "OW2", "OW3")
+import portfolio as pf
+
 TIERS = {"1": 3.0, "2": 6.0, "3": 9.0}      # pp limit per tier (D34)
 NET_TOL = 1e-3                              # pp
 EPS = 1e-12
@@ -167,32 +170,6 @@ def tier_range(rating: str) -> tuple[float, float]:
         return 0.0, 0.0
     t = TIERS[rating[2]]
     return (0.0, t) if rating.startswith("OW") else (-t, 0.0)
-
-
-def parse_ratings(grid: list[list[str]], groups: list[str],
-                  where: str = "") -> tuple[dict, dict]:
-    """Rows 0-1 of a grid: active pp over a rating, one pair per column."""
-    row0 = grid[0] + [""] * (len(groups) - len(grid[0]))   # read_grid trims blanks
-    for i, row in ((0, row0), (1, grid[1])):
-        if len(row) != len(groups):
-            raise BookError(f"{where}row {i} has {len(row)} cells, "
-                            f"expected {len(groups)}")
-    active, rating = {}, {}
-    for j, g in enumerate(groups):
-        r = grid[1][j]
-        if r not in RATINGS:
-            old = ("; this book still uses multipliers, convert it to active pp"
-                   if r in ("OW", "UW") else "")
-            raise BookError(f"{where}{g}: unknown rating {r!r} "
-                            f"(want {' | '.join(RATINGS)}){old}")
-        try:
-            a = float(row0[j]) if row0[j] else 0.0
-        except ValueError:
-            a = math.nan
-        if not math.isfinite(a):
-            raise BookError(f"{where}{g}: active pp {row0[j]!r} is not a number")
-        active[g], rating[g] = a + 0.0, r
-    return active, rating
 
 
 def tilt(neutral: dict, active: dict, rating: dict,
@@ -225,40 +202,6 @@ def tilt(neutral: dict, active: dict, rating: dict,
     if s <= 0:
         raise BookError("active weights leave nothing to hold")
     return {g: v / s for g, v in w.items()}, faults, floored
-
-
-def parse_tactical(grid: list[list[str]], sectors: list[str], home_of: dict,
-                   where: str = TAC):
-    """Parse a tactical grid -> (groups, active, rating, members, claim)."""
-    if len(grid) < 3 or not grid[2]:
-        raise BookError(f"{where}: need rows multiplier, rating, group names")
-    groups = grid[2]
-    seen = set()
-    for g in groups:
-        if not g:
-            raise BookError(f"{where}: blank group name in row 2")
-        if g in seen:
-            raise BookError(f"{where}: duplicate group {g!r}")
-        if g in sectors:
-            raise BookError(f"{where}: {g!r} is already a baseline group")
-        seen.add(g)
-
-    active, rating = parse_ratings(grid, groups, f"{where} ")
-    members, claim = {}, {}
-    for j, g in enumerate(groups):
-        members[g] = grid_column(grid, j)
-        if rating[g] != "NO" and not members[g]:
-            raise BookError(f"{where} {g}: rated {rating[g]} but claims "
-                            "nothing; delete the column or rate it NO")
-        for t in members[g]:
-            if t not in home_of:
-                raise BookError(f"{where} {g}: {t} is in no baseline group")
-            if t in claim:
-                why = (f"listed twice in {g}" if claim[t] == g
-                       else f"claimed by both {claim[t]} and {g}")
-                raise BookError(f"{where}: {t} is {why}")
-            claim[t] = g
-    return groups, active, rating, members, claim
 
 
 def migrate(sector_fcap: dict, total: float, claim: dict,
@@ -393,133 +336,71 @@ def apply_constraints(w_group: dict, members: dict, fcap, cons: dict) -> dict:
             "large": (T, L) if lg["on"] else None}
 
 
-def compute(name: str, portfolio: Path = PORTFOLIO, params_dir: Path = PARAMS,
-            book: list[list[str]] | None = None, tactical: dict | None = None,
-            constraints: dict | None = None, strict: bool = True) -> dict:
-    """Compute the target without writing or printing anything.
+def compute(name: str, portfolio: Path = PORTFOLIO, db: Path = DB, as_of=None,
+            spec: dict | None = None, constraints: dict | None = None,
+            strict: bool = True) -> dict:
+    """Compute the target on as_of's session without writing or printing.
 
-    Each override replaces the file on disk, for previewing unsaved edits:
-        book         the book grid (rows 0-2 + ticker rows), as read_grid returns
-        tactical     {"on": bool, "grid": tactical grid or None}
-        constraints  a constraints dict, validated like constraints.json
-    strict=False returns active-check faults in "active" instead of raising.
-    Lines build() would print before its report are returned in "messages".
+    spec and constraints replace book.json and constraints.json, for
+    previewing unsaved edits. strict=False returns active-check faults in
+    "active" instead of raising. Lines build() prints before its report are
+    returned in "messages".
     """
     home = portfolio / name
     if not home.is_dir():
         raise BookError(f"no such portfolio: {home}")
-    anchor_s = portfolio_anchor(home)
-    baseline = portfolio / "baseline" / anchor_s
-
-    book_p, input_p = home / BOOK, home / "input" / GRID
-    base_grid_p, base_alloc_p = baseline / GRID, baseline / ALLOC
-    needed = [(base_grid_p, f"run scr/portfolio.py fork {name} --anchor {anchor_s}"),
-              (base_alloc_p, f"run scr/portfolio.py fork {name} --anchor {anchor_s}"),
-              (input_p, f"run scr/portfolio.py fork {name}")]
-    if book is None:
-        needed.append((book_p, f"run scr/portfolio.py fork {name}"))
-    for p, hint in needed:
-        if not p.exists():
-            raise BookError(f"missing input: {p}\n      {hint}")
+    params = params_mod.at(db, as_of)
+    session = params.attrs["session"]
+    cols = params_mod.universe(params)
+    if not cols:
+        raise BookError(f"no ticker with a float cap on {session}")
 
     messages = []
     statement = load_statement(home)
     cons = (load_constraints(home) if constraints is None
             else validate_constraints(constraints))
-    if tactical is None:
-        tac_on, _ = read_switch(home / TAC_SWITCH, "tactical_group")
-        tac_grid = read_grid(home / TAC) if tac_on and (home / TAC).exists() else None
-        if tac_on and tac_grid is None:
-            raise BookError(f"{TAC_SWITCH} is yes but {TAC} is missing")
-    else:
-        tac_on, tac_grid = bool(tactical.get("on")), tactical.get("grid")
-        if tac_on and not tac_grid:
-            raise BookError("tactical overlay is on but has no groups; add one "
-                            "or switch the overlay off")
-    invalid = set(read_invalid(home))
+    if spec is None:
+        spec = pf.read_book(home)
+        if spec is None:
+            spec = pf.default_book(cols)
+            messages.append(f"INFO  no {BOOK}; every group AV with all its names")
+    evaluated, rep = pf.evaluate(spec, cols)
+    messages += pf.report_lines(rep, session)
+    book, flipped = pf.normalize_book(evaluated)
+    for g in flipped:
+        messages.append(f"WARN  {g}: no investable name left on {session}, rated NO")
 
-    book = read_grid(book_p) if book is None else book
-    forked, base = read_grid(input_p), read_grid(base_grid_p)
-    if forked != base:
-        raise BookError(f"input/{GRID} no longer matches the baseline grid\n"
-                        f"      re-run scr/portfolio.py fork {name}")
-    if len(book) < 3 or book[2] != base[2]:
-        raise BookError(f"{BOOK} group row differs from input/{GRID}\n"
-                        "      group names and order are the binding contract; "
-                        f"re-run scr/portfolio.py fork {name}")
-
-    sectors = base[2]
-    active, rating = parse_ratings(book, sectors)
-    full = {g: grid_column(base, j) for j, g in enumerate(sectors)}
-    home_of = {t: g for g in sectors for t in full[g]}
-
-    if tac_on:
-        tac_g, tac_a, tac_r, tac_members, claim = parse_tactical(
-            tac_grid, sectors, home_of)
-    else:
-        tac_g, tac_a, tac_r, tac_members, claim = [], {}, {}, {}, {}
+    sectors = list(cols)
+    tac_on = book["tactical"]["on"]
+    tac_list = book["tactical"]["groups"] if tac_on else []
+    if tac_on and not tac_list:
+        raise BookError("tactical overlay is on but has no groups; add one or switch "
+                        "the overlay off")
+    tac_g = [t["name"] for t in tac_list]
+    claim = {m: t["name"] for t in tac_list for m in t["members"]}
     groups = sectors + tac_g
-    active.update(tac_a)
-    rating.update(tac_r)
+    active = {g: float(book["groups"][g]["pp"]) for g in sectors}
+    active.update({t["name"]: float(t["pp"]) for t in tac_list})
+    rating = {g: book["groups"][g]["rating"] for g in sectors}
+    rating.update({t["name"]: t["rating"] for t in tac_list})
 
+    full = {g: list(cols[g]) for g in sectors}
+    home_of = {t: g for g in sectors for t in full[g]}
     members = {}
-    for j, g in enumerate(sectors):
-        raw = grid_column(book, j)
-        alien = sorted(set(raw) - set(full[g]))
-        if alien:
-            raise BookError(f"{g}: {alien} not in the baseline column\n"
-                            "      tickers can only be deleted; additions and "
-                            "moves belong in index/group_map_live.csv")
-        taken = [t for t in raw if t in claim]
-        members[g] = [t for t in raw if t not in claim]
-        if rating[g] != "NO" and not members[g]:
-            if taken:
-                raise BookError(f"{g}: rated {rating[g]} but every name left is "
-                                f"claimed ({', '.join(taken)}); rate it NO")
-            raise BookError(f"{g}: rated {rating[g]} but every name is deleted; "
-                            "rate it NO to exclude the group")
-    for g in tac_g:
-        members[g] = full[g] = tac_members[g]
+    for g in sectors:
+        inv = set(book["groups"][g]["investable"])
+        members[g] = [t for t in full[g] if t in inv and t not in claim]
+    for t in tac_list:
+        members[t["name"]] = full[t["name"]] = list(t["members"])
 
-    bad = sorted(invalid & {t for g in groups for t in members[g]})
-    if bad:
-        raise BookError(f"invalidated names are investable or claimed: {bad}\n"
-                        f"      remove them from {BOOK} / {TAC}, or restore them "
-                        f"(scr/portfolio.py screen {name} --restore ...)")
-
-    alloc = pd.read_csv(base_alloc_p)
-    anchor = pd.to_datetime(alloc["anchor_date"].iloc[0]).date()
-    if str(anchor) != anchor_s:
-        raise BookError(f"baseline/{anchor_s}/{ALLOC} says anchor {anchor}; "
-                        f"re-run scr/baseline.py --date {anchor_s}")
-    if set(alloc["group"]) != set(sectors):
-        raise BookError("baseline sector_allocation.csv and its grid disagree; "
-                        f"re-run scr/baseline.py --date {anchor_s}")
-
-    pp = params_dir / f"{anchor}.csv"
-    if not pp.exists():
-        raise BookError(f"missing {pp}\n      run scr/params.py --date {anchor}")
-    if pp.stat().st_mtime > base_alloc_p.stat().st_mtime + 1:
-        raise BookError(f"{pp.name} was rebuilt after the baseline\n"
-                        f"      re-run scr/portfolio.py fork {name} --anchor {anchor}")
-    params = pd.read_csv(pp).set_index("ticker")
-
-    absent = sorted(set(home_of) - set(params.index))
-    if absent:
-        raise BookError(f"baseline tickers missing from {pp.name}: {absent}")
-    fcap = params["float_cap"]
-
-    sector_fcap = dict(zip(alloc["group"], alloc["fcap"]))
-    total = alloc["fcap"].sum()
+    par = params.set_index("ticker")
+    fcap = par["float_cap"]
+    sector_fcap = {g: float(sum(fcap[t] for t in full[g])) for g in sectors}
+    total = sum(sector_fcap.values())
     if claim:
-        for g in sectors:
-            got = sum(fcap[t] for t in full[g])
-            if abs(got / sector_fcap[g] - 1) > 1e-9:
-                raise BookError(f"{g}: baseline float cap {sector_fcap[g]:.0f} "
-                                f"but params say {got:.0f}; re-run baseline.py")
         bweight, migrated = migrate(sector_fcap, total, claim, home_of, fcap)
     else:
-        bweight = dict(zip(alloc["group"], alloc["weight"]))
+        bweight = {g: v / total for g, v in sector_fcap.items()}
         migrated = {g: 0.0 for g in sectors}
 
     live_g = [g for g in groups if rating[g] != "NO"]
@@ -548,7 +429,7 @@ def compute(name: str, portfolio: Path = PORTFOLIO, params_dir: Path = PARAMS,
             raise BookError(f"{CONSTRAINTS}: sector.per_group names no known group: "
                             f"{stray}" + ("" if tac_on else
                                           "\n      (tactical groups count only "
-                                          "while the tactical switch is on)"))
+                                          "while the tactical overlay is on)"))
     any_on = any(cons[k]["on"] for k in CAPS)
     if any_on:
         sol = apply_constraints(w_raw, members, fcap, cons)
@@ -558,9 +439,9 @@ def compute(name: str, portfolio: Path = PORTFOLIO, params_dir: Path = PARAMS,
         w_cap, bound, full_g, stock_w, pin = w_raw, set(), set(), None, {}
 
     sec = pd.DataFrame({
-        "anchor_date": anchor,
+        "as_of": session,
         "group": groups,
-        "kind": ["tactical" if g in tac_a else "sector" for g in groups],
+        "kind": ["tactical" if g in tac_g else "sector" for g in groups],
         "rating": [rating[g] for g in groups],
         "active_pp": [active[g] for g in groups],
         "n_members": [len(members[g]) for g in groups],
@@ -578,8 +459,8 @@ def compute(name: str, portfolio: Path = PORTFOLIO, params_dir: Path = PARAMS,
     sec = sec.sort_values(["weight", "fcap"], ascending=False).reset_index(drop=True)
 
     hold = pd.DataFrame([
-        {"trade_date": anchor, "ticker": t, "sector": g, "home_sector": home_of[t],
-         "rating": rating[g], "close_raw": params.at[t, "close_raw"],
+        {"trade_date": session, "ticker": t, "sector": g, "home_sector": home_of[t],
+         "rating": rating[g], "close_raw": par.at[t, "close_raw"],
          "fcap": float(fcap[t]),
          "weight_in_sector": fcap[t] / sum(fcap[u] for u in members[g])}
         for g in held_g for t in members[g]
@@ -624,26 +505,26 @@ def compute(name: str, portfolio: Path = PORTFOLIO, params_dir: Path = PARAMS,
     if tac_on:
         tac_note = (f"on -- {len(tac_g)} group(s), {len(claim)} names, "
                     f"{sum(migrated.values()) / total:.2%} of the book migrated")
-    elif (home / TAC).exists():
-        tac_note = f"off -- {TAC} present but not read"
+    elif book["tactical"]["groups"]:
+        tac_note = f"off -- {len(book['tactical']['groups'])} group(s) defined, not applied"
     else:
         tac_note = "off"
 
-    return {"name": name, "anchor": anchor, "anchor_s": anchor_s, "holdings": hold,
-            "allocation": sec, "in_range": in_range, "range_note": range_note,
-            "statement": statement, "constraints": cons, "any_on": any_on,
-            "active": act,
-            "cap_note": cap_note, "report": report, "tac_note": tac_note,
-            "tac_groups": tac_g, "members": members, "full": full,
-            "home_of": home_of, "params_file": pp.name, "messages": messages}
+    return {"name": name, "as_of": session, "requested": None if as_of is None else str(as_of),
+            "holdings": hold, "allocation": sec, "in_range": in_range,
+            "range_note": range_note, "statement": statement, "constraints": cons,
+            "any_on": any_on, "active": act, "cap_note": cap_note, "report": report,
+            "tac_note": tac_note, "tac_groups": tac_g, "members": members, "full": full,
+            "home_of": home_of, "params": params, "universe": cols, "reconcile": rep,
+            "spec": book, "messages": messages}
 
 
-def build(name: str, portfolio: Path = PORTFOLIO, params_dir: Path = PARAMS) -> dict:
-    """Compute and write the target. Returns a summary dict for callers/tests."""
-    res = compute(name, portfolio, params_dir)
+def build(name: str, portfolio: Path = PORTFOLIO, db: Path = DB, as_of=None) -> dict:
+    """Compute on as_of's session and write target/. Returns compute()'s result."""
+    res = compute(name, portfolio, db, as_of=as_of)
     for line in res["messages"]:
         print(line)
-    home, anchor = portfolio / name, res["anchor"]
+    home, session = portfolio / name, res["as_of"]
     sec, hold, members, full = (res["allocation"], res["holdings"], res["members"],
                                 res["full"])
     cap_note, tac_note, range_note = res["cap_note"], res["tac_note"], res["range_note"]
@@ -657,21 +538,23 @@ def build(name: str, portfolio: Path = PORTFOLIO, params_dir: Path = PARAMS) -> 
     act = res["active"]
     act_note = (f"net {act['net_pp']:+.3f} pp, {act['used_pp']:.2f} of a "
                 f"{act['budget_pp']:g} pp budget")
+    book = (f"portfolio/{name}/{BOOK}" if (home / BOOK).exists()
+            else f"default (no {BOOK}): every group AV with all its names")
     (out / "built_from.txt").write_text(
-        f"book:        portfolio/{name}/{BOOK}\n"
-        f"anchor_date: {anchor}\n"
-        f"baseline:    portfolio/baseline/{res['anchor_s']}/\n"
-        f"params:      data/params/{res['params_file']}\n"
-        f"active:      {act_note}\n"
-        f"constraints: {cap_note}\n"
-        f"tactical:    {tac_note}\n"
-        f"holdings:    {range_note}\n"
-        f"built_at:    {datetime.now().astimezone():%Y-%m-%d %H:%M}\n",
+        f"book:         {book}\n"
+        f"as_of:        {res['requested'] or 'latest session'}\n"
+        f"priced_as_of: {session}\n"
+        f"params:       data/market.db session {session} (params.at)\n"
+        f"active:       {act_note}\n"
+        f"constraints:  {cap_note}\n"
+        f"tactical:     {tac_note}\n"
+        f"holdings:     {range_note}\n"
+        f"built_at:     {datetime.now().astimezone():%Y-%m-%d %H:%M}\n",
         encoding="utf-8")
 
     live = sec[sec["rating"] != "NO"]
     dead = sec[sec["rating"] == "NO"]
-    print(f"OK    {name}  anchor_date {anchor}  constraints {cap_note}")
+    print(f"OK    {name}  priced as of {session}  constraints {cap_note}")
     print(f"      active {act_note}")
     print(f"      tactical {tac_note}")
     print(f"      {out / ALLOC}  {len(sec)} groups, {len(dead)} NO")
@@ -700,16 +583,18 @@ def build(name: str, portfolio: Path = PORTFOLIO, params_dir: Path = PARAMS) -> 
               f"(scr/portfolio.py new creates one)")
     else:
         print(f"      {range_note}")
-    return {"anchor": anchor, "holdings": hold, "allocation": sec,
-            "in_range": in_range}
+    return res
 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("name", help="portfolio folder under portfolio/")
+    ap.add_argument("--as-of", default=None,
+                    help="YYYY-MM-DD; priced on the last session on or before it "
+                         "(default: the latest)")
     a = ap.parse_args(argv)
     try:
-        build(a.name)
+        build(a.name, as_of=a.as_of)
     except BookError as e:
         print(f"FAIL  {e}")
         return 1

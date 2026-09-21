@@ -1,111 +1,52 @@
 import json
 
-import baseline
-import pandas as pd
+import params
 import pytest
 import target
 from common import (
     BOOK,
-    GRID,
+    DECISION_LOG,
+    DECISIONS,
     BookError,
     default_constraints,
+    default_screens,
     default_statement,
-    grid_column,
-    read_grid,
-    read_invalid,
+    load_decisions,
+    load_screens,
+    setup_hash,
     validate_constraints,
+    validate_decision,
+    validate_screens,
     validate_statement,
-    write_grid,
+)
+from conftest import (
+    UNIVERSE,
+    build,
+    compute,
+    constrain,
+    holdings,
+    make,
+    make_db,
+    set_book,
+    weights,
 )
 
 import portfolio
 
-ANCHOR = pd.Timestamp("2026-09-11").date()
 
-# group -> {ticker: float cap}; G1 is 60% of the book, G2 30%, G3 10%.
-UNIVERSE = {"G1": {"AAA": 40.0, "BBB": 20.0},
-            "G2": {"CCC": 20.0, "DDD": 10.0},
-            "G3": {"EEE": 10.0}}
-
-
-@pytest.fixture
-def root(tmp_path):
-    rows = [{"ticker": t, "company_name": f"{t} Corp", "group": g,
-             "float_cap": f, "close_raw": 1.0,
-             "adj_factor": 1.0, "turnover_21_pct": 0.5 if t != "DDD" else 0.01}
-            for g, m in UNIVERSE.items() for t, f in m.items()]
-    params = pd.DataFrame(rows)
-    (tmp_path / "params").mkdir()
-    params.to_csv(tmp_path / "params" / f"{ANCHOR}.csv", index=False)
-    publish(tmp_path, params, ANCHOR)
-    return tmp_path
-
-
-def publish(root, params, anchor):
-    """Write baseline/<anchor>/."""
-    baseline.write(root / "portfolio" / "baseline" / str(anchor),
-                   *baseline.build(params, anchor))
-
-
-def make(root, name="p", **statement):
-    s = default_statement()
-    s.update(statement)
-    portfolio.new(name, portfolio=root / "portfolio", statement=s)
-    portfolio.fork(name, anchor=str(ANCHOR), portfolio=root / "portfolio")
-    return root / "portfolio" / name
-
-
-def constrain(home, **blocks):
-    c = default_constraints()
-    for k, v in blocks.items():
-        c[k] = {**c[k], **({} if k == "active" else {"on": True}), **v}
-    (home / "constraints.json").write_text(json.dumps(c))
-
-
-def holdings(res):
-    return dict(zip(res["holdings"].ticker, res["holdings"].target_weight))
-
-
-def edit_book(home, ratings=None, pp=None, blank=()):
-    """ratings {group: rating}, pp {group: active pp}; unnamed pp are 0."""
-    g = read_grid(home / BOOK)
-    for grp, r in (ratings or {}).items():
-        j = g[2].index(grp)
-        g[1][j] = r
-        g[0][j] = f"{(pp or {}).get(grp, 0):g}"
-    cols = [[t for t in grid_column(g, j) if t not in blank] for j in range(len(g[2]))]
-    write_grid(home / BOOK, g[:3], cols)
-
-
-def build(root, name="p"):
-    return target.build(name, portfolio=root / "portfolio", params_dir=root / "params")
-
-
-def weights(res):
-    return dict(zip(res["allocation"]["group"], res["allocation"]["weight"]))
-
-
-def test_baseline_weights(root):
-    alloc = pd.read_csv(root / "portfolio" / "baseline" / str(ANCHOR) / "sector_allocation.csv")
-    assert dict(zip(alloc.group, alloc.weight)) == pytest.approx(
-        {"G1": 0.6, "G2": 0.3, "G3": 0.1})
-    assert read_grid(root / "portfolio" / "baseline" / str(ANCHOR) / GRID)[2] == \
-        ["G1", "G2", "G3"]
-
-
-def test_untilted_target_equals_baseline(root):
+def test_untilted_target_equals_the_float_cap_universe(root):
     home = make(root)
-    assert read_grid(home / BOOK)[:2] == [["0", "0", "0"], ["AV", "AV", "AV"]]
+    assert not (home / BOOK).exists() and (home / "screens.json").exists()
     res = build(root)
     assert weights(res) == pytest.approx({"G1": 0.6, "G2": 0.3, "G3": 0.1})
-    h = dict(zip(res["holdings"].ticker, res["holdings"].target_weight))
-    assert h["AAA"] == pytest.approx(0.4)
+    assert holdings(res)["AAA"] == pytest.approx(0.4)
+    assert any("no book.json" in m for m in res["messages"])
+    assert "priced_as_of: 2026-09-11" in (home / "target" / "built_from.txt").read_text()
 
 
 def test_active_pp_and_deletion(root):
     home = make(root)
-    edit_book(home, ratings={"G1": "OW1", "G2": "UW1"}, pp={"G1": 3, "G2": -3},
-              blank=["BBB"])
+    set_book(home, ratings={"G1": "OW1", "G2": "UW1"}, pp={"G1": 3, "G2": -3}, drop=["BBB"])
     res = build(root)
     assert weights(res) == pytest.approx({"G1": 0.63, "G2": 0.27, "G3": 0.1})
     h = holdings(res)
@@ -117,7 +58,7 @@ def test_active_pp_and_deletion(root):
 
 def test_no_leaves_the_neutral(root):
     home = make(root)
-    edit_book(home, ratings={"G1": "OW2", "G2": "UW1", "G3": "NO"}, pp={"G1": 3, "G2": -3})
+    set_book(home, ratings={"G1": "OW2", "G2": "UW1", "G3": "NO"}, pp={"G1": 3, "G2": -3})
     res = build(root)
     # neutral G1 .6/.9, G2 .3/.9; +-3 pp on top
     assert weights(res) == pytest.approx({"G1": 2 / 3 + 0.03, "G2": 1 / 3 - 0.03, "G3": 0})
@@ -131,15 +72,14 @@ def test_active_checks_list_every_fault(root):
     constrain(home, active={"budget_pp": 5})
     # G1 OW1 +4 breaks its range, G3 UW3 -12 breaks its range and the floor
     # (neutral 10%), the net is -8, and 1/2 (4 + 12) = 8 > 5
-    edit_book(home, ratings={"G1": "OW1", "G3": "UW3"}, pp={"G1": 4, "G3": -12})
+    set_book(home, ratings={"G1": "OW1", "G3": "UW3"}, pp={"G1": 4, "G3": -12})
     with pytest.raises(BookError) as e:
         build(root)
     msg = str(e.value)
     for part in ("G1: OW1 allows +0 to +3 pp, has +4", "G3: UW3 allows -9 to +0 pp",
                  "G3: -12 pp takes it below 0%", "net to -8.000", "use 8.00 of a 5 pp"):
         assert part in msg
-    res = target.compute("p", portfolio=root / "portfolio", params_dir=root / "params",
-                         strict=False)
+    res = compute(root, strict=False)
     assert len(res["active"]["faults"]) == 5
     assert weights(res)["G3"] == 0 and "EEE" not in holdings(res)  # floored, renormalised
     assert weights(res)["G1"] == pytest.approx(0.64 / 0.94)
@@ -147,54 +87,54 @@ def test_active_checks_list_every_fault(root):
 
 def test_group_at_zero_holds_nothing_and_range_reports_the_floor(root):
     home = make(root)
-    later = pd.Timestamp("2026-09-12").date()
-    params = pd.read_csv(root / "params" / f"{ANCHOR}.csv")
-    params.loc[params.ticker == "EEE", "float_cap"] = 90 * 0.05 / 0.95    # G3 = 5%
-    params.to_csv(root / "params" / f"{later}.csv", index=False)
-    publish(root, params, later)
-    portfolio.fork("p", anchor=str(later), portfolio=root / "portfolio")
-    edit_book(home, ratings={"G1": "OW2", "G3": "UW2"}, pp={"G1": 5, "G3": -5})
-    res = target.compute("p", portfolio=root / "portfolio", params_dir=root / "params")
+    make_db(root, fcap={("2026-09-11", "EEE"): 90 * 0.05 / 0.95})     # G3 = 5% on the 11th
+    set_book(home, ratings={"G1": "OW2", "G3": "UW2"}, pp={"G1": 5, "G3": -5})
+    res = compute(root)
     assert weights(res)["G3"] == 0 and "EEE" not in holdings(res)
     assert sum(holdings(res).values()) == pytest.approx(1)
     rng = res["active"]["range"]
     assert rng["G3"] == pytest.approx((-5, 0)) and rng["G1"] == (0, 6) and rng["G2"] == (0, 0)
+    # the day before, G3 is 10% and the same book holds EEE at 5%
+    assert holdings(compute(root, as_of="2026-09-10"))["EEE"] == pytest.approx(0.05)
 
 
-def test_multiplier_book_fails_with_a_hint(root):
+def test_bad_rating_and_pp_fail(root):
     home = make(root)
-    g = read_grid(home / BOOK)
-    write_grid(home / BOOK, [["OW", "AV", "AV"], ["OW", "AV", "AV"], g[2]],
-               [grid_column(g, j) for j in range(3)])
-    with pytest.raises(BookError, match="still uses multipliers"):
-        build(root)
-    write_grid(home / BOOK, [["1.25", "0", "0"], ["OW1", "AV", "AV"], g[2]],
-               [grid_column(g, j) for j in range(3)])
-    with pytest.raises(BookError, match=r"net to \+1\.250"):  # an old multiplier as pp
-        build(root)
-    write_grid(home / BOOK, [["x", "0", "0"], ["AV", "AV", "AV"], g[2]],
-               [grid_column(g, j) for j in range(3)])
-    with pytest.raises(BookError, match="'x' is not a number"):
+    spec = set_book(home)
+    for g, s, msg in (("G1", {"rating": "OW", "investable": ["AAA"]}, "unknown rating 'OW'"),
+                      ("G1", {"rating": "AV", "pp": "x", "investable": ["AAA"]},
+                       "'x' must be a number")):
+        bad = json.loads(json.dumps(spec))
+        bad["groups"][g] = s
+        (home / BOOK).write_text(json.dumps(bad))
+        with pytest.raises(BookError, match=msg):
+            build(root)
+    bad = json.loads(json.dumps(spec))
+    bad["groups"]["G1"] = {"rating": "OW1", "pp": 1.25, "investable": ["AAA"]}
+    (home / BOOK).write_text(json.dumps(bad))
+    with pytest.raises(BookError, match=r"net to \+1\.250"):
         build(root)
 
 
 def test_tactical_claim_moves_budget(root):
     home = make(root)
-    (home / "tactical_group.json").write_text('{"tactical_group": "yes"}')
-    write_grid(home / "tactical_group.csv", [["0"], ["AV"], ["T1"]], [["BBB"]])
-    res = build(root)
-    assert weights(res) == pytest.approx({"G1": 0.4, "G2": 0.3, "G3": 0.1, "T1": 0.2})
-    write_grid(home / "tactical_group.csv", [["2"], ["OW1"], ["T1"]], [["BBB"]])
-    edit_book(home, ratings={"G2": "UW1"}, pp={"G2": -2})
+    set_book(home, tactical={"on": True, "groups": [
+        {"name": "T1", "rating": "AV", "pp": 0, "members": ["BBB"]}]})
+    assert weights(build(root)) == pytest.approx({"G1": 0.4, "G2": 0.3, "G3": 0.1, "T1": 0.2})
+    set_book(home, ratings={"G2": "UW1"}, pp={"G2": -2}, tactical={"on": True, "groups": [
+        {"name": "T1", "rating": "OW1", "pp": 2, "members": ["BBB"]}]})
     assert weights(build(root)) == pytest.approx({"G1": 0.4, "G2": 0.28, "G3": 0.1, "T1": 0.22})
+    set_book(home, tactical={"on": False, "groups": [
+        {"name": "T1", "rating": "OW1", "pp": 2, "members": ["BBB"]}]})
+    res = compute(root, strict=False)
+    assert "T1" not in weights(res) and "defined, not applied" in res["tac_note"]
 
 
 def test_compute_matches_build_and_writes_nothing(root):
     home = make(root)
-    edit_book(home, ratings={"G1": "OW1", "G2": "UW1"}, pp={"G1": 2, "G2": -2},
-              blank=["BBB"])
+    set_book(home, ratings={"G1": "OW1", "G2": "UW1"}, pp={"G1": 2, "G2": -2}, drop=["BBB"])
     constrain(home, stock={"max": 0.5})
-    res = target.compute("p", portfolio=root / "portfolio", params_dir=root / "params")
+    res = compute(root)
     assert not (home / "target").exists()
     built = build(root)
     assert res["holdings"].equals(built["holdings"])
@@ -202,21 +142,96 @@ def test_compute_matches_build_and_writes_nothing(root):
 
 
 def test_compute_overrides_replace_files(root):
-    home = make(root)
-    kw = {"portfolio": root / "portfolio", "params_dir": root / "params"}
-    book = read_grid(home / BOOK)
-    j = book[2].index("G3")
-    book[1][j] = "NO"
-    tac = {"on": True, "grid": [["0"], ["AV"], ["T1"], ["BBB"]]}
+    make(root)
+    spec = portfolio.default_book({g: sorted(m) for g, m in UNIVERSE.items()})
+    spec["groups"]["G3"]["rating"] = "NO"
+    spec["tactical"] = {"on": True, "groups": [{"name": "T1", "rating": "AV", "pp": 0,
+                                                "members": ["BBB"]}]}
     cons = {**default_constraints(), "sector": {"on": True, "max": 0.45, "per_group": {}}}
-    res = target.compute("p", book=book, tactical=tac, constraints=cons, **kw)
+    res = compute(root, spec=spec, constraints=cons)
     # G3 NO: G1 .4, G2 .3, T1 .2 over .9 -> G1 .444, G2 .333, T1 .222; no cap binds
     assert weights(res) == pytest.approx({"G1": 0.4 / 0.9, "G2": 0.3 / 0.9,
                                           "T1": 0.2 / 0.9, "G3": 0})
-    assert weights(target.compute("p", **kw)) == pytest.approx(
-        {"G1": 0.6, "G2": 0.3, "G3": 0.1})                       # files untouched
+    assert weights(compute(root)) == pytest.approx({"G1": 0.6, "G2": 0.3, "G3": 0.1})
     with pytest.raises(BookError, match="tactical overlay is on but has no groups"):
-        target.compute("p", tactical={"on": True, "grid": None}, **kw)
+        compute(root, spec={**spec, "tactical": {"on": True, "groups": []}})
+
+
+def test_as_of_snaps_to_the_last_session_on_or_before(root):
+    make(root)
+    assert str(compute(root, as_of="2026-08-01")["as_of"]) == "2026-07-31"   # a Saturday
+    assert str(compute(root, as_of="2026-12-31")["as_of"]) == "2026-09-11"   # after the history
+    assert compute(root, as_of="2026-08-01")["requested"] == "2026-08-01"
+    with pytest.raises(BookError, match="before the first session"):
+        compute(root, as_of="2026-01-01")
+    with pytest.raises(BookError, match="not a YYYY-MM-DD"):
+        compute(root, as_of="01/08/2026")
+
+
+def test_a_name_not_trading_is_dropped_with_a_message(root):
+    home = make(root)
+    set_book(home)                                               # BBB investable
+    make_db(root, fcap={("2026-09-11", "BBB"): None})           # no print on the 11th
+    res = compute(root)
+    assert "BBB" not in holdings(res)
+    assert any("G1: ['BBB'] not trading on 2026-09-11" in m for m in res["messages"])
+    assert weights(res)["G1"] == pytest.approx(0.4 / 0.8)
+    assert "BBB" in holdings(compute(root, as_of="2026-09-10"))
+    assert "BBB" in portfolio.read_book(home)["groups"]["G1"]["investable"]   # spec kept
+
+
+def test_evaluate_drops_lost_groups_and_rates_gained_ones_no(root):
+    home = make(root)
+    set_book(home, ratings={"G2": "UW1", "G3": "OW1"}, pp={"G2": -2.5, "G3": 2.5}, drop=["DDD"])
+    # new universe: EEE moves to G4, FFF lists in G2
+    make_db(root, universe={**UNIVERSE, "G2": {**UNIVERSE["G2"], "FFF": 10.0}},
+            regroup={"EEE": "G4"})
+    res = compute(root, strict=False)
+    rep = res["reconcile"]
+    assert rep["lost_groups"] == {"G3": "OW1 (2.5 pp)"} and rep["appeared"] == ["G4"]
+    assert res["spec"]["groups"]["G4"]["rating"] == "NO"
+    assert "FFF" not in holdings(res) and "DDD" not in holdings(res)   # no auto-add
+    assert any("net to -2.500" in f for f in res["active"]["faults"])
+    with pytest.raises(BookError, match=r"net to -2\.500"):
+        compute(root)
+
+
+def test_write_book_checks_the_group_map(root):
+    home = make(root)
+    base = portfolio.default_book({g: sorted(m) for g, m in UNIVERSE.items()})
+    for patch, msg in (
+            ({"groups": {**base["groups"], "G1": {"rating": "AV", "investable": ["CCC"]}}},
+             "belong to another group"),
+            ({"groups": {**base["groups"], "GX": {"rating": "AV", "investable": []}}},
+             "unknown group"),
+
+            ({"tactical": {"on": True, "groups": [{"name": "T1", "members": ["AAA"]},
+                                                  {"name": "T2", "members": ["AAA"]}]}},
+             "claimed by both T1 and T2"),
+            ({"tactical": {"on": True, "groups": [{"name": "G2", "members": ["AAA"]}]}},
+             "already a group name")):
+        with pytest.raises(BookError, match=msg):
+            portfolio.write_book(home, {**base, **patch})
+    assert not (home / BOOK).exists()
+
+
+def test_write_book_normalizes_and_applies_auto_no(root):
+    home = make(root)
+    flipped = portfolio.write_book(home, {
+        "groups": {"G1": {"rating": "UW2", "pp": -4.123456, "investable": ["BBB", "AAA"]},
+                   "G2": {"rating": "UW1", "pp": -1, "investable": ["CCC"]},
+                   "G3": {"rating": "AV", "pp": None, "investable": []}},
+        "tactical": {"on": True, "groups": [
+            {"name": "T1", "rating": "OW2", "pp": 4.1235, "members": ["CCC"]},
+            {"name": "T2", "rating": "OW1", "pp": 2, "members": []}]}})
+    assert flipped == ["T2", "G2", "G3"]
+    b = portfolio.read_book(home)
+    assert b["groups"]["G1"] == {"rating": "UW2", "pp": -4.1235, "investable": ["AAA", "BBB"]}
+    assert b["groups"]["G2"] == {"rating": "NO", "pp": 0, "investable": ["CCC"]}
+    assert b["tactical"]["groups"][1] == {"name": "T2", "rating": "NO", "pp": 0, "members": []}
+    # neutral G1 .6 / .8, T1 CCC's .2 / .8; the rest are NO
+    assert weights(build(root)) == pytest.approx(
+        {"G1": 0.75 - 0.041235, "T1": 0.25 + 0.041235, "G2": 0, "G3": 0, "T2": 0})
 
 
 def test_sector_cap_iterates(root):
@@ -245,8 +260,8 @@ def test_cap_too_tight_fails(root):
 
 def test_per_group_cap_applies_to_tactical(root):
     home = make(root)
-    (home / "tactical_group.json").write_text('{"tactical_group": "yes"}')
-    write_grid(home / "tactical_group.csv", [["0"], ["AV"], ["T1"]], [["BBB"]])
+    set_book(home, tactical={"on": True, "groups": [
+        {"name": "T1", "rating": "AV", "pp": 0, "members": ["BBB"]}]})
     constrain(home, sector={"max": 1.0, "per_group": {"T1": 0.1}})
     # T1 0.2 -> 0.1; 0.1 spread pro-rata over G1 .4, G2 .3, G3 .1
     assert weights(build(root)) == pytest.approx(
@@ -347,139 +362,11 @@ def test_holding_range_flag(root):
     assert build(root, "q")["in_range"] is False
 
 
-def test_addition_fails(root):
-    home = make(root)
-    g = read_grid(home / BOOK)
-    write_grid(home / BOOK, g[:3], [["AAA", "BBB", "EEE"], ["CCC", "DDD"], ["EEE"]])
-    with pytest.raises(BookError, match="not in the baseline column"):
-        build(root)
-
-
-def test_refork_carries_by_name(root):
-    home = make(root)
-    edit_book(home, ratings={"G2": "UW1", "G3": "OW1"}, pp={"G2": -2.5, "G3": 2.5},
-              blank=["DDD"])
-    # New baseline: G3 disappears, G4 appears, FFF joins G2.
-    params = pd.DataFrame([
-        {"ticker": t, "group": g, "float_cap": 1.0, "close_raw": 1.0, "adj_factor": 1.0}
-        for g, ts in {"G1": ["AAA", "BBB"], "G2": ["CCC", "DDD", "FFF"],
-                      "G4": ["EEE"]}.items() for t in ts])
-    new_anchor = pd.Timestamp("2026-09-12").date()
-    params.to_csv(root / "params" / f"{new_anchor}.csv", index=False)
-    publish(root, params, new_anchor)
-    rep = portfolio.fork("p", anchor=str(new_anchor), portfolio=root / "portfolio")
-    g = read_grid(home / BOOK)
-    j = g[2].index("G2")
-    assert (g[0][j], g[1][j]) == ("-2.5", "UW1")
-    assert grid_column(g, j) == ["CCC", "FFF"]  # DDD stays deleted, FFF comes in
-    assert rep["appeared"] == ["G4"] and rep["lost"] == {"G3": "OW1 (2.5 pp)"}
-    with pytest.raises(BookError, match=r"net to -2\.500"):  # G3's +2.5 left with it
-        build(root)
-    assert "anchor_date: 2026-09-12" in (home / "input" / "forked_from.txt").read_text()
-
-
-def test_portfolios_on_different_anchors(root):
-    make(root)
-    later = pd.Timestamp("2026-09-12").date()
-    params = pd.read_csv(root / "params" / f"{ANCHOR}.csv")
-    params.loc[params.ticker == "EEE", "float_cap"] = 30.0      # G3 grows
-    params.to_csv(root / "params" / f"{later}.csv", index=False)
-    publish(root, params, later)
-    portfolio.new("q", portfolio=root / "portfolio")
-    portfolio.fork("q", anchor=str(later), portfolio=root / "portfolio")
-    assert weights(build(root, "q"))["G3"] == pytest.approx(0.25)
-    assert weights(build(root, "p"))["G3"] == pytest.approx(0.1)  # p unaffected
-
-
-def test_fork_missing_anchor_fails(root):
-    portfolio.new("p", portfolio=root / "portfolio")
-    with pytest.raises(BookError, match="no baseline to fork from"):
-        portfolio.fork("p", anchor="2026-01-02", portfolio=root / "portfolio")
-
-
-def test_screen_invalidates_restores(root):
-    s = default_statement()
-    s["screens"]["turnover"] = {"on": True, "min_pct": 0.1}
-    home = make(root, screens=s["screens"])
-    kw = {"portfolio": root / "portfolio", "params_dir": root / "params"}
-
-    def live():
-        g = read_grid(home / BOOK)
-        return {t for j in range(len(g[2])) for t in grid_column(g, j)}
-
-    excl = portfolio.screen("p", **kw)
-    assert excl.ticker.tolist() == ["DDD"]
-    assert excl.in_book.tolist() == ["yes"]
-    assert "DDD" in live()
-    portfolio.screen("p", invalidate_all=True, **kw)
-    assert "DDD" not in live() and read_invalid(home) == ["DDD"]
-    assert "DDD" in grid_column(read_grid(home / "input" / GRID), 1)  # still in universe
-    build(root)                                                        # valid book builds
-
-    # typing it back into the book while invalid is refused
-    edit = read_grid(home / BOOK)
-    write_grid(home / BOOK, edit[:3], [["AAA", "BBB"], ["CCC", "DDD"], ["EEE"]])
-    with pytest.raises(BookError, match="invalidated names"):
-        build(root)
-    portfolio.screen("p", restore=["DDD"], **kw)
-    assert read_invalid(home) == []
-    build(root)
-
-    # re-fork keeps an invalidated name out
-    portfolio.screen("p", invalidate=["DDD"], **kw)
-    rep = portfolio.fork("p", anchor=str(ANCHOR), portfolio=root / "portfolio")
-    assert "DDD" not in live() and rep["invalid_kept_out"] == []
-
-
-def test_screen_covers_the_universe_not_just_the_book(root):
-    s = default_statement()
-    s["screens"]["turnover"] = {"on": True, "min_pct": 0.1}
-    home = make(root, screens=s["screens"])
-    kw = {"portfolio": root / "portfolio", "params_dir": root / "params"}
-    edit_book(home, blank=("DDD",))          # deleted in the Book step, never screened
-
-    excl = portfolio.screen("p", **kw)
-    assert excl.ticker.tolist() == ["DDD"]   # a curated book cannot hide it
-    assert excl.in_book.tolist() == ["no"]
-
-    # invalidating a name already out of the book bars it from coming back
-    portfolio.screen("p", invalidate=["DDD"], **kw)
-    assert read_invalid(home) == ["DDD"]
-    assert portfolio.screen("p", **kw).empty     # and it is not suggested twice
-
-
-def test_invalidating_last_name_rates_group_no(root):
-    home = make(root)
-    s = json.loads((home / "statement.json").read_text())
-    s["screens"]["float_cap"] = {"on": True, "min_bn_vnd": 15 / 1e9}
-    (home / "statement.json").write_text(json.dumps(s))
-    portfolio.screen("p", invalidate=["EEE"], portfolio=root / "portfolio",
-                     params_dir=root / "params")
-    g = read_grid(home / BOOK)
-    j = g[2].index("G3")
-    assert (g[0][j], g[1][j]) == ("0", "NO")
-    assert weights(build(root))["G3"] == 0
-
-
-def test_tactical_cannot_claim_invalidated(root):
-    home = make(root)
-    (home / "screen").mkdir()
-    (home / "screen" / "invalid.csv").write_text(
-        "ticker,group,screen,value,threshold,invalidated_at\nBBB,G1,turnover,0,0.1,x\n")
-    edit_book(home, blank=["BBB"])
-    (home / "tactical_group.json").write_text('{"tactical_group": "yes"}')
-    write_grid(home / "tactical_group.csv", [["0"], ["AV"], ["T1"]], [["BBB"]])
-    with pytest.raises(BookError, match="invalidated names"):
-        build(root)
-
-
 def test_delete(root):
     home = make(root)
     with pytest.raises(BookError, match="--yes"):
         portfolio.delete("p", portfolio=root / "portfolio")
     assert home.exists()
-    with pytest.raises(BookError, match="refusing"):
-        portfolio.delete("baseline", yes=True, portfolio=root / "portfolio")
     portfolio.delete("p", yes=True, portfolio=root / "portfolio")
     assert not home.exists()
     with pytest.raises(BookError, match="no such portfolio"):
@@ -501,10 +388,152 @@ def test_new_refuses_existing_and_bad_names(root):
     ({"rebalance": {"frequency": None, "drift_threshold": None}}, "needs"),
     ({"rebalance": {"frequency": "1Q", "drift_threshold": None,
                     "breach_tolerance": 10}}, "breach_tolerance"),
-    ({"screens": {"fol": {"on": True}}}, "unknown screen"),
+    ({"screens": {"turnover": {"on": True}}}, "moved to screens.json"),
 ])
 def test_statement_validation(patch, msg):
     s = json.loads(json.dumps(default_statement()))
     s.update(patch)
     with pytest.raises(BookError, match=msg):
         validate_statement(s)
+
+
+@pytest.mark.parametrize("patch, msg", [
+    ({"liquidity": {"on": True}}, "unknown screen"),
+    ({"fol": {"on": "yes"}}, "true or false"),
+    ({"turnover": {"on": True, "min_pct": -1}}, "non-negative"),
+    ({"float_cap": {"on": True, "min": 3}}, "unknown key"),
+])
+def test_screens_validation(patch, msg):
+    with pytest.raises(BookError, match=msg):
+        validate_screens({**default_screens(), **patch})
+
+
+# ---------- screens are flags (D62) ----------
+
+def test_screen_flags_never_remove_a_name(root):
+    home = make(root)
+    make_db(root, fol={"AAA": 0.49, "CCC": 0.2})
+    (home / "screens.json").write_text(json.dumps({
+        "turnover": {"on": True, "min_pct": 0.1}, "float_cap": {"on": True, "min_bn_vnd": 15 / 1e9},
+        "fol": {"on": True, "min_limit_pct": 30}}))
+    flags = portfolio.screen("p", portfolio=root / "portfolio", db=root / "m.db")
+    got = {(f["t"], f["screen"], f["why"]) for f in flags}
+    assert got == {("DDD", "turnover", "below"), ("DDD", "float_cap", "below"),
+                   ("EEE", "float_cap", "below"), ("CCC", "fol", "below"),
+                   ("BBB", "fol", "no data"), ("DDD", "fol", "no data"),
+                   ("EEE", "fol", "no data")}
+    assert len(build(root)["holdings"]) == 5
+    assert load_screens(home)["fol"]["min_limit_pct"] == 30
+
+
+def test_turnover_with_short_history_flags_no_data(root):
+    make(root)
+    frame = params.at(root / "m.db", "2026-06-03")     # 3 sessions in
+    flags = portfolio.screen_flags(frame, ["AAA"], validate_screens(
+        {"turnover": {"on": True, "min_pct": 0.1}}))
+    assert flags == [{"t": "AAA", "screen": "turnover", "value": None, "threshold": 0.1,
+                      "why": "no data"}]
+
+
+# ---------- decisions (D56, D60, D61) ----------
+
+def record(root, eff, kind=None, note=""):
+    return portfolio.record_decision(root / "portfolio" / "p", eff, kind, note,
+                                     db=root / "m.db")
+
+
+def test_first_decision_is_inception_and_later_ones_need_a_kind(root):
+    home = make(root)
+    set_book(home, ratings={"G1": "OW1", "G3": "UW1"}, pp={"G1": 3, "G3": -3})
+    d = record(root, "2026-07-04", "period", "t0")           # a Saturday; kind forced
+    assert (d["kind"], d["priced_as_of"]) == ("inception", "2026-07-03")
+    assert d["setup_hash"] == setup_hash(home) and len(d["holdings"]) == 5
+    assert sum(h["w"] for h in d["holdings"]) == pytest.approx(1)
+    with pytest.raises(BookError, match="before inception 2026-07-04"):
+        record(root, "2026-07-01", "active")
+    with pytest.raises(BookError, match="period or active"):
+        record(root, "2026-08-03")
+    record(root, "2026-08-03", "active", "tilt")
+    record(root, "2026-07-04", "active", "redo")              # re-record: still inception
+    assert [(x["id"], x["kind"], x["note"]) for x in load_decisions(home)] == [
+        ("2026-07-04", "inception", "redo"), ("2026-08-03", "active", "tilt")]
+    assert sorted(p.name for p in (home / DECISIONS).iterdir()) == [
+        "2026-07-04.json", "2026-08-03.json", DECISION_LOG]
+    assert (home / DECISIONS / DECISION_LOG).read_text().splitlines()[0] == \
+        "id,effective,recorded_at,priced_as_of,kind,setup_hash,note"
+
+
+def test_record_refuses_a_book_that_fails_the_strict_build(root):
+    home = make(root)
+    set_book(home, ratings={"G1": "OW1"}, pp={"G1": 3})
+    with pytest.raises(BookError, match="net to"):
+        record(root, "2026-09-01")
+    assert not (home / DECISIONS).exists()
+
+
+def test_reset_archives_and_the_next_record_is_inception(root):
+    home = make(root)
+    record(root, "2026-07-01")
+    record(root, "2026-08-03", "period")
+    dest = portfolio.reset(home)
+    assert load_decisions(home) == [] and (dest / DECISION_LOG).exists()
+    assert sorted(p.name for p in dest.iterdir()) == ["2026-07-01.json", "2026-08-03.json",
+                                                      DECISION_LOG]
+    assert record(root, "2026-06-15", "period")["kind"] == "inception"
+    with pytest.raises(BookError, match="no decisions"):
+        portfolio.reset(make(root, "q"))
+
+
+def test_setup_hash_follows_statement_and_constraints_not_screens(root):
+    home = make(root)
+    h = setup_hash(home)
+    (home / "screens.json").write_text(json.dumps({"turnover": {"on": True, "min_pct": 1}}))
+    assert setup_hash(home) == h
+    constrain(home, stock={"max": 0.5})
+    assert setup_hash(home) != h
+
+
+def test_evaluate_carries_by_name():
+    cols = {"G1": ["AAA"], "G2": ["CCC", "DDD"], "G4": ["FFF"]}
+    prof = {"groups": {"G1": {"rating": "OW1", "pp": 3, "investable": ["AAA", "BBB"]},
+                       "G2": {"rating": "AV", "pp": 0, "investable": ["CCC", "DDD"]},
+                       "G3": {"rating": "UW1", "pp": -3, "investable": ["EEE"]}},
+            "tactical": {"on": True, "groups": [{"name": "T", "rating": "AV", "pp": 0,
+                                                 "members": ["DDD", "ZZZ"]}]}}
+    spec, rep = portfolio.evaluate(prof, cols)
+    assert spec["groups"]["G1"] == {"rating": "OW1", "pp": 3, "investable": ["AAA"]}
+    assert spec["groups"]["G2"]["investable"] == ["CCC", "DDD"]
+    assert spec["groups"]["G4"] == {"rating": "NO", "pp": 0, "investable": []}
+    assert "G3" not in spec["groups"]
+    assert spec["tactical"]["groups"][0]["members"] == ["DDD"]
+    assert rep == {"dropped_names": {"G1": ["BBB"], "T": ["ZZZ"]},
+                   "lost_groups": {"G3": "UW1 (-3 pp)"}, "appeared": ["G4"]}
+
+
+def test_load_decisions_orders_validates_and_fills_kind(tmp_path):
+    folder = tmp_path / DECISIONS
+    folder.mkdir()
+    rows = ["2026-09-02", "2026-08-15", "2026-08-01"]
+    (folder / DECISION_LOG).write_text(
+        "id,effective,recorded_at,anchor,note\n" + "".join(f"{i},{i},,,\n" for i in rows))
+    for i in rows:
+        (folder / f"{i}.json").write_text(json.dumps(
+            {"id": i, "effective": i, "groups": {}, "tactical": {"on": False, "groups": []}}))
+    got = load_decisions(tmp_path)
+    assert [(d["id"], d["kind"]) for d in got] == [
+        ("2026-08-01", "inception"), ("2026-08-15", "period"), ("2026-09-02", "period")]
+    assert load_decisions(tmp_path / "none") == []
+    with pytest.raises(BookError, match="unknown rating 'XX'"):
+        validate_decision({"id": "a", "effective": "2026-01-01",
+                           "groups": {"G1": {"rating": "XX"}}})
+    with pytest.raises(BookError, match="not YYYY-MM-DD"):
+        validate_decision({"id": "a", "effective": "01/01/2026", "groups": {}})
+    with pytest.raises(BookError, match="kind 'rebalance'"):
+        validate_decision({"id": "a", "effective": "2026-01-01", "groups": {},
+                           "kind": "rebalance"})
+    with pytest.raises(BookError, match="holdings must be a list"):
+        validate_decision({"id": "a", "effective": "2026-01-01", "groups": {},
+                           "holdings": [{"t": "AAA"}]})
+    (folder / "2026-09-02.json").unlink()
+    with pytest.raises(BookError, match="is missing"):
+        load_decisions(tmp_path)

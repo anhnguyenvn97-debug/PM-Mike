@@ -38,23 +38,20 @@ only; every script's module docstring is its spec; no commits until asked (D16).
 
 ```
 data/fiinpro/*.xlsx              hand     FiinPro drops, only market input
-index/group_map_live.csv         hand     default sector grouping
-index/anchor_date.json           hand     default anchor (2026-09-11)
-index/fol.csv                    hand     FOL limits (deferred, header only)
-portfolio/<name>/statement.json  hand     approach, scope, holdings, mandate, screens
-portfolio/<name>/constraints.json  hand   active budget pp; sector / stock / large caps
-portfolio/<name>/sector_constituents_custom.csv   hand   the book: active pp, rating
-portfolio/<name>/tactical_group.*  hand, optional
-portfolio/<name>/screen/invalid.csv  CLI   screen --invalidate / --restore
+index/group_map_live.csv         hand     sector grouping, read on every calculation
+index/fol.csv                    hand     FOL limits (header only; the fol screen flags "no data")
+portfolio/<name>/statement.json  desk     approach, scope, holdings, rebalance rule
+portfolio/<name>/constraints.json  desk   active budget pp; sector / stock / large caps
+portfolio/<name>/screens.json    desk     screen rules, flags only
+portfolio/<name>/book.json       desk     the working allocation (spec)
+portfolio/<name>/decisions/      desk     recorded decisions, one per date; archive/ after reset
+portfolio/<name>/backtest_config.json  desk  backtest costs, lag, risk-free rate
 
 data/market.db, data/market.txt  derived  scr/ingest.py
-data/params/<anchor>.csv         derived  scr/params.py
-portfolio/baseline/<anchor>/     derived  scr/baseline.py (or fork --anchor)
-portfolio/<name>/input/          derived  scr/portfolio.py fork
-portfolio/<name>/screen/         derived  scr/portfolio.py screen
-portfolio/<name>/target/         derived  scr/target.py
-portfolio/<name>/backtest_config.json  hand/desk  backtest costs, lag, risk-free rate
+data/params/<date>.csv           cache    scr/params.py --as-of (nothing reads it)
+portfolio/<name>/target/         derived  scr/target.py (desk Record)
 portfolio/<name>/backtest_engine/  derived  scr/backtest_engine.py
+portfolio/<name>/_v1/            kept     files the v2 migration retired; delete when satisfied
 data/fiinpro/archive/            kept     old drops, read by nothing
 ```
 
@@ -243,12 +240,46 @@ data/fiinpro/archive/            kept     old drops, read by nothing
       6 breach rebalances in eight months; `null` or `0.25` gives 0 (turnover
       28.3% vs 38.4%), `0.02` gives 19 (52.3%, 25.7 bps).
 
+## Step 16 — Standing target, fill at the open, decision log (D50-D54)
+
+Spec: `docs/plan_decision_log.md`. Three steps, in order, each green on
+pytest / ruff / `node --check` and logged in `Progress.md` before the next.
+
+- [x] **A. Standing target + breach-to-edge.** Target derived at inception,
+      calendar and decision only; breach/drift trade against it (D50).
+      Breach clips to the cap and spills within scope (D51). Re-baseline the
+      tests; record before/after turnover and trigger counts on
+      `energy_focus`.
+- [x] **B. Fill at the open** (D52). `open_adj` from `market.db`; two-leg fill
+      session; no blind session at lag 1.
+- [x] **C. Decision log + replay** (D53, D54). `portfolio/<name>/decisions/`,
+      `run(..., timeline=)`, `decision` trigger, desk Record button and
+      Backtest replay toggle.
+- [x] Calendar clock settled (D55): a decision does not move it; the next
+      refresh is the first session of the next period.
+- [x] **D. Decision review** (D56). One profile per effective date (a
+      re-record replaces it); Record moves to Target; optional Step 7
+      Decisions lists the log and shows a profile read-only.
+
+## Step 17 — v2: date-driven portfolio, setup / loop desk (D57-D63)  [DONE 2026-09-21]
+
+Spec: `docs/plan_v2.md`. Built 2026-09-21; see Progress.md.
+
+- [x] **A.** `params.at(session)`, `as_of=`/`spec=` through `target.compute`
+      and the engine loaders; energy_focus numbers unchanged.
+- [x] **B.** `book.json`, `screens.json`, screens as flags (invalidation
+      retired), decision `kind` rules and reset, `priced_as_of`/`setup_hash`/
+      holdings/flags, `migrate_v2.py`.
+- [x] **C.** Desk: 8-step setup/loop bar, Allocation + Target page, Backtest
+      in the flow, Monitor with screen thresholds, Decisions pills and Reset.
+- [x] **D.** Retire baseline.py, fork/carry, newer_than, anchor_date.json,
+      the migration script.
+
 ## Later (not scheduled)
 
-- Minimum trade size; calendar as a review; trade to band edge (deferred in
-  the 2026-09-16 review).
+- Minimum trade size; calendar as a review. ~~Trade to band edge~~ → Step 16 A.
 
-- FOL: fill `index/fol.csv`, add a `fol` screen to `common.SCREENS` (D14).
+- FOL: fill `index/fol.csv` (the `fol` screen itself moves into Step 17 B).
 - Rebalance stage consuming `statement.json` mandate; drift = ½ Σ |gap| at
   group grain (D7), against today's re-derived target (D42).
 - Survivorship bias, sizing/execution (see `HANDOFF.md` §8).

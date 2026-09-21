@@ -140,7 +140,7 @@ table.mini td{padding:2px 10px 2px 0}
 .confirm{display:flex;gap:8px;align-items:center;color:var(--uw);font-size:12.5px;flex-wrap:wrap}
 
 /* stepper */
-.steps{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:0;background:var(--surface);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.steps{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:0;background:var(--surface);border:1px solid var(--line);border-radius:8px;overflow:hidden}
 .steps button{all:unset;cursor:pointer;padding:10px 12px;display:flex;flex-direction:column;gap:2px;border-right:1px solid var(--line);position:relative;min-width:0}
 .steps button:last-child{border-right:0}
 .steps button:hover{background:var(--sunk)}
@@ -166,7 +166,10 @@ table.mini td{padding:2px 10px 2px 0}
 .field.full{grid-column:1/-1}
 .field label{font-size:12.5px;font-weight:600;color:var(--ink-2)}
 .field .hint{font-size:12px;color:var(--ink-3)}
-input[type=text],input[type=number],textarea,select{background:var(--surface);border:1px solid var(--line-2);border-radius:6px;padding:7px 9px;width:100%;min-width:0}
+input[type=date]{color-scheme:light}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) input[type=date]{color-scheme:dark}}
+:root[data-theme="dark"] input[type=date]{color-scheme:dark}
+input[type=text],input[type=number],input[type=date],textarea,select{background:var(--surface);border:1px solid var(--line-2);border-radius:6px;padding:7px 9px;width:100%;min-width:0}
 textarea{resize:vertical;min-height:64px}
 input:focus,textarea:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px;border-color:transparent}
 .inline{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
@@ -222,7 +225,6 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--accent);outline-
 .chip{font-family:var(--mono);font-size:11.5px;padding:1px 6px;border-radius:4px;background:var(--sunk);border:1px solid var(--line);cursor:grab;user-select:none;display:inline-flex;gap:4px;align-items:center}
 .chip:hover{border-color:var(--line-2)}
 .chip.in{opacity:.45;cursor:default}
-.chip.inv{text-decoration:line-through;color:var(--ink-3);background:transparent;border-style:dashed;cursor:not-allowed}
 .chip.tac{background:var(--accent-soft);border-color:var(--accent)}
 .chip.claimed{opacity:.55;cursor:default;border-color:var(--accent);border-style:dashed}
 .chip .x{all:unset;cursor:pointer;color:var(--ink-3);padding:0 2px;font-size:12px}
@@ -282,7 +284,7 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--accent);outline-
 @media (prefers-reduced-motion: reduce){*{transition:none!important}}
 
 /* backtest */
-.bt-ctl{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1.4fr) auto auto;gap:14px 20px;align-items:end}
+.bt-ctl{display:grid;grid-template-columns:minmax(0,1.4fr) auto auto auto;gap:14px 20px;align-items:end}
 .bt-ctl input[type=date]{background:var(--surface);border:1px solid var(--line-2);border-radius:6px;padding:6px 9px;width:100%;min-width:0;color-scheme:light dark}
 .bt-snap,.bt-stamp{font-family:var(--mono);font-size:11.5px;color:var(--ink-3)}
 .bt-res{display:flex;flex-direction:column;gap:20px}
@@ -305,6 +307,17 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--accent);outline-
 .mk-calendar,.mk-inception{fill:var(--surface);stroke:var(--accent);stroke-width:2}
 .mk-drift{fill:var(--surface);stroke:var(--warn);stroke-width:2}
 .mk-breach{fill:var(--surface);stroke:var(--uw);stroke-width:2}
+.mk-decision{fill:var(--ow);stroke:var(--surface);stroke-width:1.5}
+.pill.dec{background:var(--ow-soft);color:var(--ow)}
+.bt-key i.d.dec{border-color:var(--ow);background:var(--ow)}
+.dec-log{display:flex;flex-direction:column;gap:10px}
+.dec-rec{display:grid;grid-template-columns:170px auto minmax(0,1fr) auto;gap:10px;align-items:end}
+.dec-rec .seg button,.dec-rec .kindpill{height:36px;box-sizing:border-box;display:inline-flex;align-items:center}
+.dec-rec input,.dec-rec .btn{height:36px;box-sizing:border-box}
+@media (max-width:640px){.dec-rec{grid-template-columns:1fr}}
+.dec-list tbody tr{cursor:pointer}
+.dec-list tbody tr:hover{background:var(--sunk)}
+.dec-list tbody tr[aria-selected="true"]{background:var(--accent-soft);box-shadow:inset 3px 0 0 var(--accent)}
 .cross{stroke:var(--ink-3);stroke-width:1;stroke-dasharray:2 3}
 .bt-tip{position:absolute;pointer-events:none;background:var(--surface);border:1px solid var(--line-2);border-radius:6px;box-shadow:var(--shadow);padding:7px 9px;font-size:12px;display:grid;grid-template-columns:auto auto;gap:2px 12px;white-space:nowrap;z-index:5}
 .bt-tip b{grid-column:1/-1;font-family:var(--mono);font-weight:500}
@@ -330,3 +343,13 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--accent);outline-
 .busy{opacity:.6;pointer-events:none}
 .dirtybar{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 16px;background:var(--warn-soft);color:var(--warn);border-radius:8px;font-size:13px}
 .console .i{color:var(--accent)}
+.flow-wide{display:flex;flex-direction:column;gap:16px;min-width:0}
+/* setup / loop blocks in the step bar */
+.steps .blk-setup{background:var(--sunk)}
+.steps .blk-setup:hover{background:var(--line)}
+.steps .loop-start{border-left:3px solid var(--accent)}
+.steps button.pair{background:var(--accent-soft);opacity:.85}
+/* screen flags and new listings on a chip */
+.chip .flag,.flag-l{font-style:normal;font-weight:700;color:var(--warn);font-family:var(--sans);padding:0 1px}
+.chip .newdot,.new-l{font-style:normal;font-size:9.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--accent);font-family:var(--sans);font-weight:600}
+.chip.gone{text-decoration:line-through;color:var(--ink-3);background:transparent;border-style:dashed;cursor:default}

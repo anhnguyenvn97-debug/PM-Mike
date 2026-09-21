@@ -5,6 +5,264 @@ left) and `HANDOFF.md` (the pre-rebuild system, now reference only).
 
 ---
 
+## 2026-09-21 — v2: date-driven portfolio, setup / loop desk (D57-D63; Step 17 A-D)
+
+Spec: `docs/plan_v2.md`. Built in one pass, gated on the Step 16 numbers.
+
+### Decisions landed
+- **D57** `params.at(db, session)` on demand; `common.sessions/snap`. Retired
+  `baseline.py`, fork, `input/`, `index/anchor_date.json`, `newer_than`,
+  `portfolio/baseline/`. A name with no float cap on a session is left out of
+  that session's params (`attrs["no_float_cap"]`) instead of failing.
+- **D58** `book.json` spec replaces the grid book and `tactical_group.*`.
+  `write_book` checks the group map: a ticker the map puts in another group,
+  an unknown group, a tactical name clashing with a group. A ticker the map
+  lacks may stay (dropped at evaluation).
+- **D59** `portfolio.evaluate` (was `reconcile_profile`) for the build, the
+  preview and the replay; auto-NO applied after it with a WARN.
+- **D60** `target.compute/build(as_of=)`; `priced as of` when the date is not
+  a session. Kinds: first decision inception (forced), later period/active,
+  none before inception; `portfolio.reset` archives decisions/.
+- **D61** decisions store `setup_hash` (statement + constraints, validated);
+  Decisions and the backtest timeline show "setup differs". Replay unchanged:
+  inception holds before its date, each decision the standing target after.
+- **D62** screens are flags: `screens.json` (turnover, float cap, new `fol`
+  on `index/fol.csv`, "no data" when a name has no row). `invalid.csv`,
+  `exclusions.csv`, `--invalidate`, `restore` and the invalidation rule gone.
+- **D63** `backtest_engine.monitor`: last decision held to the latest session;
+  drift, breach, next calendar date (weekday estimate), fills, flags.
+
+### Desk
+- 8 steps: Setup 1 Statement, 2 Rebalancing, 3 Constraints; Loop 4 Allocation
+  and 5 Target (one page, two step-bar entries), 6 Backtest (moved in from its
+  own page), 7 Monitor (with the screen rules editor), 8 Decisions (Reset).
+- Target: effective date, kind (inception pill or Period/Active), note,
+  "Save and record ..." when edits are unsaved; the preview re-prices and the
+  Allocation universe switches to the date's session. Chips show screen flags
+  (!), "new" (not in the last decision's universe), and struck-through names
+  not trading on the date (kept in the book). Lost groups can be removed.
+- Data tab: the universe of the latest session replaces the params/baseline
+  panel; no build button.
+
+### Migration
+- One-shot `scr/migrate_v2.py` (deleted after use): grids -> `book.json`,
+  statement screens -> `screens.json`, `2026-09-11-01` -> `2026-09-11.json`
+  (inception, priced_as_of = the v1 anchor), retired files -> `_v1/`.
+  Dry-run and apply on a scratch copy, then on live `portfolio/`.
+
+### Checks
+- Gate, live after migration: `energy_focus` mechanical and replay backtest
+  identical to v1 (max |dnav| 0, rebalance log equal; 5.99%, 8 calendar /
+  2 breach / 0 drift). Target weights within 2.4e-8 of v1 (v1 read baseline
+  weights rounded to 8 decimals). No name dropped by D59. `financial_test`
+  fails as before (every group NO in its live book).
+- pytest 142 passed (tests rebuilt on a shared `market.db` fixture; new
+  params, kind, reset, flags, monitor, next-calendar tests); ruff clean;
+  `node --check` clean.
+- Desk walk-through on a migrated scratch copy: every step renders without a
+  JS error; Reset, a back-dated inception (Saturday -> Friday session), the
+  before-inception guard, "Save and record active rebalance", screen rules
+  save, Monitor, Backtest replay of both decisions.
+
+---
+
+## 2026-09-21 — Decision review, one profile per date (D56; Step 16 D)
+
+User direction after Step C: the smallest decision frequency is one a day, so a
+date holds at most one profile; recording on a date that has one replaces it.
+Record belongs with the Target step (you record what you just saw); reviewing
+the log is an optional Step 7, read-only. No guided 4 -> 6 loop: the steps stay
+a normal flow.
+
+### Changes
+- `portfolio.record_decision`: id is the effective date; any row and JSON on
+  that date are removed before the new one is written; log.csv kept sorted by
+  effective. Prints "replaced" or "recorded". Older `<date>-NN` ids still load
+  and are replaced by date.
+- `common.py` / `portfolio.py` / `app.py` docstrings: not append-only any more.
+  `decisions_json` adds each profile's `groups` and `tactical`.
+- Engine unchanged: two dates snapping to one session still resolve last-wins
+  with "superseded by" in the timeline status.
+- `desk.js`: Book loses the Decision log panel. Target ends with a Record
+  decision panel (date and note kept across re-renders; the button reads
+  "Replace decision for <date>" when that date exists). New optional step 7
+  Decisions: the log (newest first, click to select, latest selected by
+  default) and the selected profile as recorded: rated groups with rating,
+  active pp and investable names, tactical groups, the NO groups in one line,
+  and the replay drops against today's grid. No Next button after Target.
+- `desk.css`: `.steps` grid 7 columns; `.dec-list` row hover and selection.
+- CLAUDE.md: decisions/ wording.
+
+### Checks
+- pytest 125 passed (decision tests updated for date ids and replace); ruff
+  clean; `node --check` clean.
+- Desk on a scratch copy of `portfolio/`: step 7 lists both decisions, row
+  click switches the profile; Target's button turned to "Replace decision for
+  2026-09-11" and recording replaced the live-format `2026-09-11-01` entry.
+
+---
+
+## 2026-09-21 — Decision log and replay (D53, D54, D55; Step 16 C)
+
+Spec: `docs/plan_decision_log.md` Step C. A portfolio now keeps an append-only
+log of allocation profiles, and the backtest can replay it.
+
+**D53 decision log.** `portfolio/<name>/decisions/log.csv` plus `<id>.json`,
+where `id = <effective>-<NN>`. A profile is the desk's book spec verbatim (the
+book and tactical overlay only) plus metadata. The Book step's Record decision
+button records the book as saved on disk. It is refused while the page has
+unsaved book edits, when the page's book version is stale, and when the saved
+book fails the strict target build. There is no delete route; remove the log
+row and the JSON by hand. The engine replays the profiles as `decision`
+triggers, which sit above calendar in the trigger ladder. `timeline=None` is
+the mechanical run, exactly as before.
+
+**D54.** A profile is carried onto today's baseline grid by name
+(`portfolio.reconcile_profile`), filtered through today's
+`screen/invalid.csv`, and loaded non-strict. Invalidated-since names, names gone
+from their column and lost groups are each a WARN naming the decision, and
+they appear in `built_from.txt` and in the desk's Decision timeline. A lost
+group's pp break the net; `tilt` floors and renormalises.
+
+**D55.** A decision never moves the calendar: `period_keys` is unchanged.
+
+Placing profiles: an effective date snaps forward to a session. Every profile
+at or before the start collapses to the start, and the latest wins; two on one
+session, the last wins; one after the history is reported and not applied. If
+none lands on the start, the first one opens the window, with an INFO message.
+A decision that lands while a fill is pending is applied at the first free
+close (`deferred_from`). A decision on a calendar boundary is one `decision`
+fill with `also = calendar`.
+
+`RATINGS` moved from `target.py` to `common.py`, where `validate_decision`
+needs it; `target.RATINGS` still resolves. That is the only change to
+`target.py`.
+
+### Changes
+
+| File | What |
+|---|---|
+| `scr/common.py` | `DECISIONS`, `DECISION_LOG`, `DECISION_COLS`, `RATINGS`; `validate_decision`, `load_decisions`; decisions grammar in the docstring. |
+| `scr/portfolio.py` | Moved from `app.py`: `pp_cell`, `cell_pp`, `tactical_grid`, `book_grid`, `grids_from_spec`. New: `book_spec` (the saved files as a spec), `reconcile_profile`, `record_decision`; docstring. |
+| `scr/backtest_engine.py` | `load_book(book=, tactical=, strict=)` (+ `faults`); `load_profile`; `place`; `run(timeline=)` over the union of every book's names; `simulate` takes regimes (per-book target, groups, breach, edge) with the decision trigger, `also`, `deferred_from`; `breach_check(names=)` and `edge_fill` handle names outside the book. Outputs: `rebalances.csv` + `also`, `profile`, `deferred_from`; `summary.csv` + `n_decision`; `built_from.txt` `decisions:` block; `run()` returns `timeline`. CLI `--mechanical`; `build` replays the log by default. Docstring. |
+| `scr/app.py` | `GET/POST /api/p/<name>/decisions`; `detail()` + `decisions`, `head_matches_book` (via `pf.book_spec`); `summary()` + `decisions` count; backtest body `mechanical`; `backtest_json` + profile/also/deferred_from/timeline; docstring. |
+| `scr/static/desk.js`, `desk.css` | Book step Decision log panel: date, note, Record decision (disabled while dirty), match badge, log with each profile's report against today's grid. Backtest: Replay toggle (on by default, shown when the log has entries), `mk-decision` marker and legend, `decision` pill, Profile column, Decision timeline table, D54 caveat. |
+| `tests/` | Engine: no timeline equals the live book; a decision is a trigger and sets the standing target; decisions before the window collapse; the first decision opens the window; a decision on a calendar boundary is one fill; a decision during a pending fill is deferred; one after the history is reported; invalidated-since names are dropped (D54); a lost group warns and runs. Portfolio: `reconcile_profile`, `load_decisions` ordering and validation. App: record/list round trip, dirty and stale refusals, `head_matches_book` flips, backtest replay vs `mechanical`. |
+
+### Checks
+
+- pytest 125 passed; ruff and `node --check` clean.
+- `energy_focus` mechanical: unchanged from Step B (5.99%). On a scratch copy of
+  `portfolio/`, recording the live book as a decision and replaying it
+  reproduces the mechanical equity curve exactly (max abs diff 0). The live
+  `portfolio/energy_focus/` has no `decisions/` folder.
+- Desk on 5057 over the scratch copy: the Book step shows the Decision log with
+  the "book matches the last decision" badge; the Backtest runs with Replay on
+  (Decision timeline, Profile column, +5.99%) and off (no timeline).
+
+---
+
+## 2026-09-21 — Fill at the open (D52; Step 16 B)
+
+Spec: `docs/plan_decision_log.md` Step B. Until now a decision at close t filled
+at the close of t + lag, so a lag 1 fill reset the weights at t+1's close and
+erased whatever t+1's own return had done to them.
+
+**D52.** A decision at close t fills at the OPEN of t + lag_sessions; lag 0
+keeps the same-close fill. Each session is two legs: the held weights earn
+close -> open (`open_adj` / previous `close_adj`), the fill trades at the open,
+and the new weights earn open -> close. With no fill the legs compound to the
+close-to-close return. At lag 1 the fill is done before the next close, so every
+close is checked. At lag 2 or more the sessions in between stay unchecked while
+the trade is in flight; the docstring and the desk caveat say so. A name with no
+valid `open_adj` on a session uses its `close_adj` for both legs, and one INFO
+message is written if that hits a fill session. `market.db` has no null or
+non-positive `open_adj` in 16,900 rows today.
+
+### Changes
+
+| File | What |
+|---|---|
+| `scr/backtest_engine.py` | `load_market` returns `open`; `run()` builds `R_pre` / `R_post` (an invalid open falls back to the close) plus the INFO message; `simulate(..., R_post=)` runs leg 1, the fill, then leg 2; docstring (decision/fill, returns); `built_from.txt` `config:` line. |
+| `scr/common.py` | `lag_sessions` grammar: fill at the OPEN, 0 = same close. |
+| `scr/static/desk.js` | Rebalance log header "fill at the open N session(s) later" / "fill at the same close"; lag field hint; caveat 4 rewritten. |
+| `tests/test_backtest_engine.py` | `make_db(opens=)` writes `open_adj` (default = close). New: fill at the open splits the session (hand-computed nav and turnover), an open gap without a fill compounds to the close-only curve, and a breach born on the fill session is decided at that close. |
+
+### Checks
+
+- pytest 112 passed; ruff and `node --check` clean. Every Step A number held
+  unchanged with open = close.
+- `energy_focus` (in memory, nothing written), after A -> after B: triggers
+  8 / 2 / 0 both; turnover 33.37% -> 33.59%; costs 20.01 -> 20.08 bps; total
+  return 3.61% -> 5.99%; excess +3.23% -> +5.61%. The inception day explains
+  almost all of the jump in total return: buying at the 01-06 open rather than
+  its close captures that session's +2.1% open-to-close. Measured from the 01-06
+  close the return is 3.80%, so fills at the open add about 0.2 pp over the
+  window.
+
+---
+
+## 2026-09-21 — Standing target and breach-to-edge (D50, D51; Step 16 A)
+
+Spec: `docs/plan_decision_log.md` Step A. Until now the engine re-derived the
+target from that session's float cap on every trigger check, and measured drift
+against the re-derived target (D42). The target moved with the market between
+calendar dates, so a breach fill traded the whole book to a fresh target.
+
+**D50 standing target.** The target is derived at inception and on each calendar
+boundary and held between them. Drift is measured against it. With
+`frequency: null` it is derived once. This supersedes D42 and the "re-derived"
+clause of D43.
+
+**D51 per-trigger policy.** Inception, calendar and drift fills are `full`: they
+trade the whole book to the standing target. A breach fill is `edge`:
+`target.apply_constraints` runs on the held weights (group weights = held group
+sums, pro-rata key = held stock weights). That clips every broken cap to its
+limit and spills the excess within the cap's scope (D18), and leaves the rest of
+the book alone. If the clip is infeasible it falls back to `full` with a WARN,
+and breach checks pause until the next calendar date. Without the pause, the
+fallback target, which breaks the cap too, was re-filled every session at zero
+turnover. The first test run caught this.
+
+Dead names: a name held or in the standing target with no float cap on the
+decision session is zeroed in the traded-to vector and in the standing target,
+and the rest renormalise. The `gone` column is renamed `dropped` and lists
+dropped groups and dead names; a name whose group dropped is listed by its
+group. This is judged on the decision session, not the fill session as the spec
+said: every other input to a decision is read at the decision close.
+
+### Changes
+
+| File | What |
+|---|---|
+| `scr/backtest_engine.py` | `simulate` holds `standing` / `standing_at`, calls `target_fn` on inception and calendar only, drift vs standing, `alive` matrix for dead names, `stuck` flag after an infeasible edge; returns messages. New `edge_fill`. `run()` drops the one-entry cache. `rebalances.csv` + `policy`, `target_as_of`, `gone` -> `dropped`; `holdings_end.csv` `target` = standing target; `built_from.txt` mandate line; docstring. |
+| `scr/common.py` | Rebalance grammar: drift vs the standing target; a breach fill clips to the cap. |
+| `scr/app.py` | `backtest_json` passes `policy`, `target_as_of`, `dropped`. |
+| `scr/static/desk.js` | Rebalance log gets Policy and Target as of columns; breach pill title reads the tolerance; Mandate panel drift/breach text; caveat 3 rewritten; Holdings-at-end label names the standing target. |
+| `tests/test_backtest_engine.py` | Drift test inverted (`..._against_the_standing_target`, now fires); breach +30% asserts the edge weights (AAA 42%, BBB takes the excess, G2/G3 untouched); drift test asserts `full`; new: breach between calendars keeps the old standing target, edge falls back to full when infeasible (one fill, no churn), exactly three `targets_at` calls over three months. |
+
+### Checks
+
+- pytest 109 passed; ruff and `node --check` clean.
+- `energy_focus` before and after, computed with `run()` (nothing written; the
+  live `backtest_engine/` outputs are untouched):
+
+  | | before | after |
+  |---|---|---|
+  | calendar / breach / drift | 8 / 2 / 1 | 8 / 2 / 0 |
+  | turnover after inception | 36.34% | 33.37% |
+  | costs incl. inception | 20.90 bps | 20.01 bps |
+  | total return | 4.00% | 3.61% |
+  | excess vs VNINDEX | +3.62% | +3.23% |
+
+  Turnover fell, not rose. The two breaches now fill `edge` (4.1% and 3.8% of
+  turnover, against 5.1% and 3.7% before). The drift fill of 2026-07-27 is gone:
+  against the standing target of 07-01 the book had drifted less than 6%, but
+  against that day's re-derived target it had drifted 6.4%. Most of the drift
+  showed up at the 08-03 calendar fill instead (4.9% turnover against 2.2%).
+
+---
+
 ## 2026-09-16 — Breach tolerance is a statement dial (D49)
 
 Review of the three rebalance triggers. Calendar and drift are both set in the

@@ -1,45 +1,59 @@
 """Desk: a local Flask UI over the scripts. Holds no state of its own.
 
 Every page reads the files the scripts read, and every action calls the script
-function (ingest, params, baseline, portfolio new/fork/screen/delete,
-target.build) and returns what it printed. The UI writes only hand-edit files:
+function (ingest, portfolio new/record/reset/delete, target, backtest_engine)
+and returns what it printed. The UI writes only desk-owned files:
 
-    statement.json                   statement form, validate_statement first
-    backtest_config.json             backtest tab settings, validate_backtest_config first
-    constraints.json                 constraints step, validate_constraints first
-    sector_constituents_custom.csv   book step: rows 0-1 and which names stay
-    tactical_group.csv / .json       book step, tactical overlay
+    statement.json          Statement and Rebalancing steps, validate_statement first
+    constraints.json        Constraints step, validate_constraints first
+    book.json               Allocation step, portfolio.write_book (group map checked)
+    screens.json            Monitor step, validate_screens first
+    backtest_config.json    Backtest step, validate_backtest_config first
+    decisions/              Target step Record (one per date), Decisions step Reset
+
+Every calculation takes a date (D57). GET /api/p/<name>?as_of=YYYY-MM-DD
+returns the portfolio with the universe of that date's session (the latest
+without it): each group's float-cap weight and members with float cap,
+turnover, FOL limit, the screen flags (D62) and "new" (not in the universe the
+last decision was priced on). POST /preview {groups, tactical, constraints,
+as_of} runs target.compute non-strict on the unsaved book, priced as of the
+date, and returns the weights, the active checks, the names the D59 rule drops
+("drops") and the same universe block for that session.
+
+Decision log (D53, D56, D60): POST /api/p/<name>/decisions {effective, kind,
+note, version, dirty} records the book AS SAVED ON DISK with
+portfolio.record_decision (strict build on the date's session; the first
+decision is inception whatever kind is sent, later ones need period or active
+and a date after inception), then writes target/ for the same date
+(target.build). It is version-checked against book.json and refused while the
+page has unsaved book edits (dirty). GET /api/p/<name>/decisions, and
+"decisions" in /api/p/<name>, list the log newest last, each with its report
+against today's universe (portfolio.evaluate), the profile as recorded
+("groups", "tactical", "holdings", "flags") and "setup_differs" (its
+setup_hash is not today's, D61); "head_matches_book" says whether book.json
+equals the latest profile (null without one). POST /reset archives the log
+(portfolio.reset). GET /monitor is backtest_engine.monitor (D63).
 
 Writes are atomic (temp file, then rename). Every save may carry the "version"
-(mtime and size fingerprint) of the files it rewrites, as /api/p/<name> served
+(mtime and size fingerprint) of the file it rewrites, as /api/p/<name> served
 it; a save whose version no longer matches the disk FAILs, so a hand edit or a
 second tab is never silently overwritten. Saving the book applies the auto-NO
 rule: a group with no investable name left after tactical claims is rated NO,
 and so is a tactical group that claims nothing.
 
-Live preview posts the unsaved book, overlay and constraints to /preview, which
-runs target.compute with them as overrides: the same solver, nothing written.
-It runs non-strict, so a book whose active pp do not net to zero yet still
-previews; the faults, the net, the budget used and each group's allowed pp
-range come back in "active". Build is strict.
-
 The Data tab lists every drop in data/fiinpro/ (stock and index alike, see
 ingest.py) and, per benchmark in index_prices, its sessions, range, and the
 stock sessions it lacks. Rebuild database runs ingest.main, which loads both.
-
-Freshness (common.newer_than) is shown, never acted on by itself: /api/state
-lists the built anchors whose params or baseline are older than an input
-(market.db, group_map_live.csv, fol.csv), the tickers on the latest session
-the group map lacks, and per portfolio whether its input/ grid differs from
-its anchor's baseline grid (re-fork needed, with the ratings a re-fork would
-lose). index/group_map_live.csv itself stays hand-edited.
+It also lists the tickers on the latest session the group map lacks (every
+calculation on that session FAILs until they are mapped) and that session's
+universe by group ("universe" in /api/state). Group map edits need no
+rebuild: the next calculation reads the file.
 
 Backtest tab: POST /api/p/<name>/backtest runs backtest_engine.run with the
 page's start, benchmark and unsaved trading config (nothing written) and
 returns curves, statistics per benchmark, the rebalance log and end holdings.
-The page switches benchmark and risk-free rate on that result; portfolio,
-start, costs and lag need a new run. PUT /backtest_config saves
-backtest_config.json (validate_backtest_config, version-checked).
+It replays decisions/ when there are any, unless the body says "mechanical":
+true. PUT /backtest_config saves backtest_config.json (version-checked).
 
 Book spec, as the page sends it:
 
@@ -50,8 +64,8 @@ Book spec, as the page sends it:
 
 pp is the active weight in percentage points (null or missing = 0; NO always
 0). The tier range, floor, net and budget are target.py's to check. Tickers
-must be in their baseline column (tactical: anywhere in the universe), never
-invalidated, and a stock sits in at most one tactical group.
+must belong to their group in the group map (tactical: any mapped ticker), and
+a stock sits in at most one tactical group.
 
 Bound to 127.0.0.1 only. Mutations need a JSON body and a local Host header,
 so a web page elsewhere cannot drive the app.
@@ -60,179 +74,65 @@ Usage
     .venv\\Scripts\\python.exe scr\\app.py            http://127.0.0.1:5000
 """
 import contextlib
-import csv
 import io
-import json
-import math
-import os
 import re
 import sys
 import threading
-from datetime import date
 from pathlib import Path
 
 import backtest_engine
-import baseline
 import duckdb
 import ingest
 import pandas as pd
 import params as params_mod
 import target
 from common import (
-    ALLOC,
     BOOK,
     BT_CONFIG,
     CAPS,
     CONSTRAINTS,
     DB,
-    FORKED,
-    GRID,
+    DECISION_COLS,
     GROUP_MAP,
-    PARAMS,
     PORTFOLIO,
+    SCREENS_FILE,
     STATEMENT,
-    TAC,
-    TAC_SWITCH,
     BookError,
+    atomic_text,
     default_backtest_config,
     default_constraints,
-    grid_column,
+    default_screens,
+    dump,
     load_backtest_config,
     load_constraints,
+    load_decisions,
+    load_screens,
     load_statement,
-    newer_than,
-    portfolio_anchor,
-    read_grid,
-    read_invalid,
-    read_switch,
+    sessions,
+    setup_hash,
     validate_backtest_config,
     validate_constraints,
+    validate_screens,
     validate_statement,
-    write_grid,
 )
 from flask import Flask, abort, jsonify, render_template, request
 
 import portfolio as pf
 
 HERE = Path(__file__).resolve().parent
-RATINGS = target.RATINGS
 DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 LOCAL = {"127.0.0.1", "localhost"}
 
 app = Flask(__name__, template_folder=str(HERE / "templates"),
             static_folder=str(HERE / "static"))
-app.config.update(PORTFOLIO=PORTFOLIO, PARAMS=PARAMS, DB=DB)
+app.config.update(PORTFOLIO=PORTFOLIO, DB=DB)
 LOCK = threading.RLock()      # one action at a time: stdout capture and file swaps
 
 
 # ---------- file helpers ----------
 
-def atomic_text(path: Path, text: str) -> None:
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(text, encoding="utf-8", newline="\n")
-    os.replace(tmp, path)
-
-
-def atomic_grid(path: Path, header: list[list[str]], cols: list[list[str]]) -> None:
-    tmp = path.with_name(path.name + ".tmp")
-    write_grid(tmp, header, cols)
-    os.replace(tmp, path)
-
-
-def dump(obj) -> str:
-    return json.dumps(obj, indent=2) + "\n"
-
-
-def pp_cell(rating: str, pp) -> str:
-    """Row-0 cell: the active pp, 4 decimals at most; NO and a missing value are 0."""
-    if rating == "NO" or pp is None:
-        return "0"
-    if isinstance(pp, bool) or not isinstance(pp, (int, float)) or not math.isfinite(pp):
-        raise BookError(f"active pp {pp!r} must be a number")
-    return f"{round(float(pp), 4) + 0.0:g}"
-
-
-def cell_pp(cell: str) -> float:
-    return float(cell) if cell else 0.0
-
-
-def tactical_grid(spec: dict, universe: set, invalid: set) -> tuple[list, list, dict]:
-    """Tactical spec -> (header, columns, claim). Empty groups are rated NO."""
-    names, row0, row1, cols, claim = [], [], [], [], {}
-    for tg in spec.get("groups", []):
-        name = str(tg.get("name", "")).strip()
-        if not name:
-            raise BookError("tactical group with a blank name")
-        if name in names:
-            raise BookError(f"duplicate tactical group {name!r}")
-        members = list(dict.fromkeys(tg.get("members", [])))
-        for t in members:
-            if t not in universe:
-                raise BookError(f"{name}: {t} is in no baseline group")
-            if t in invalid:
-                raise BookError(f"{name}: {t} is invalidated and cannot be claimed")
-            if t in claim:
-                raise BookError(f"{t} is claimed by both {claim[t]} and {name}")
-            claim[t] = name
-        rating = tg.get("rating", "AV") if members else "NO"
-        if rating not in RATINGS:
-            raise BookError(f"{name}: unknown rating {rating!r}")
-        names.append(name)
-        row0.append(pp_cell(rating, tg.get("pp")))
-        row1.append(rating)
-        cols.append(members)
-    return [row0, row1, names], cols, claim
-
-
-def book_grid(base: list[list[str]], spec: dict, invalid: set,
-              claim: dict) -> tuple[list, list]:
-    """Book spec -> (header, columns) in baseline column order, auto-NO applied."""
-    groups, specs = base[2], spec.get("groups", {})
-    stray = sorted(set(specs) - set(groups))
-    if stray:
-        raise BookError(f"unknown group(s) in the book: {stray}")
-    row0, row1, cols = [], [], []
-    for j, g in enumerate(groups):
-        col = grid_column(base, j)
-        s = specs.get(g, {"rating": "AV", "pp": 0, "investable": col})
-        keep = set(s.get("investable", []))
-        alien = sorted(keep - set(col))
-        if alien:
-            raise BookError(f"{g}: {alien} not in the baseline column")
-        bad = sorted(keep & invalid)
-        if bad:
-            raise BookError(f"{g}: {bad} are invalidated and cannot be investable")
-        names = [t for t in col if t in keep]
-        rating = s.get("rating", "AV")
-        if rating not in RATINGS:
-            raise BookError(f"{g}: unknown rating {rating!r}")
-        if not [t for t in names if t not in claim]:
-            rating = "NO"
-        row0.append(pp_cell(rating, s.get("pp")))
-        row1.append(rating)
-        cols.append(names)
-    return [row0, row1, list(groups)], cols
-
-
-def grids_from_spec(home: Path, spec: dict) -> tuple[list, dict]:
-    """Validate a book spec against the portfolio -> (book grid, tactical override)."""
-    base = read_grid(home / "input" / GRID)
-    universe = {t for j in range(len(base[2])) for t in grid_column(base, j)}
-    invalid = set(read_invalid(home))
-    tac = spec.get("tactical") or {"on": False, "groups": []}
-    t_head, t_cols, claim = tactical_grid(tac, universe, invalid)
-    on = bool(tac.get("on"))
-    header, cols = book_grid(base, spec, invalid, claim if on else {})
-    depth = max((len(c) for c in cols), default=0)
-    book = header + [[c[i] if i < len(c) else "" for c in cols] for i in range(depth)]
-    t_depth = max((len(c) for c in t_cols), default=0)
-    t_grid = (t_head + [[c[i] if i < len(c) else "" for c in t_cols]
-                        for i in range(t_depth)]) if t_head[2] else None
-    return book, {"on": on, "grid": t_grid, "_parts": (header, cols, t_head, t_cols)}
-
-
 VERSIONED = {"statement": (STATEMENT,), "constraints": (CONSTRAINTS,),
-             "book": (BOOK, TAC, TAC_SWITCH), "backtest": (BT_CONFIG,)}
+             "book": (BOOK,), "screens": (SCREENS_FILE,), "backtest": (BT_CONFIG,)}
 
 
 def version(home: Path, key: str) -> str:
@@ -264,25 +164,16 @@ def read_kv(path: Path) -> dict:
     return out
 
 
-def read_rows(path: Path) -> list[dict]:
-    if not path.exists():
-        return []
-    with open(path, encoding="utf-8-sig", newline="") as f:
-        return list(csv.DictReader(f))
-
-
 # ---------- views of the files ----------
 
-def sessions() -> list[str]:
+def db_path() -> Path | None:
     db = app.config["DB"]
-    if db is None or not db.exists():
-        return []
-    con = duckdb.connect(db, read_only=True)
-    try:
-        return [str(r[0]) for r in con.execute(
-            "SELECT DISTINCT trade_date FROM prices ORDER BY 1").fetchall()]
-    finally:
-        con.close()
+    return db if db is not None and Path(db).exists() else None
+
+
+def session_list() -> list[str]:
+    db = db_path()
+    return [str(d) for d in sessions(db)] if db else []
 
 
 def market() -> dict:
@@ -290,7 +181,7 @@ def market() -> dict:
     drops = sorted(p for p in ingest.DROP.iterdir() if p.is_file()
                    and p.suffix.lower() in (".xlsx", ".xls", ".csv")
                    and not p.name.startswith("~$")) if ingest.DROP.exists() else []
-    have = db is not None and db.exists()
+    have = db_path() is not None
     out = {"db": have, "drops": [
         {"file": p.name, "mb": round(p.stat().st_size / 1e6, 2),
          "newer_than_db": have and p.stat().st_mtime > db.stat().st_mtime}
@@ -301,12 +192,14 @@ def market() -> dict:
     try:
         rows, tickers = con.execute(
             "SELECT count(*), count(DISTINCT ticker) FROM prices").fetchone()
-        cols = {r[0] for r in con.execute("DESCRIBE loads").fetchall()}
+        tables = {r[0] for r in con.execute("SHOW TABLES").fetchall()}
+        cols = {r[0] for r in con.execute("DESCRIBE loads").fetchall()} \
+            if "loads" in tables else set()
         kind = "kind" if "kind" in cols else "'stock'"  # database built before index drops
         loads = con.execute(
             "SELECT file_name, row_count, dropped, date_min, date_max, ticker_count, "
-            f"loaded_at, {kind} FROM loads ORDER BY loaded_at").fetchall()
-        tables = {r[0] for r in con.execute("SHOW TABLES").fetchall()}
+            f"loaded_at, {kind} FROM loads ORDER BY loaded_at").fetchall() \
+            if "loads" in tables else []
         bench = con.execute(
             "SELECT i.code, count(*), min(i.trade_date), max(i.trade_date), "
             "(SELECT count(*) FROM (SELECT DISTINCT trade_date FROM prices) s "
@@ -315,7 +208,8 @@ def market() -> dict:
             "count(*) FILTER (WHERE i.trade_date > (SELECT max(trade_date) FROM prices)) "
             "FROM index_prices i GROUP BY 1 ORDER BY 1").fetchall() \
             if "index_prices" in tables else []
-        mcap = ingest.mcap_mismatch(con) if rows else []
+        mcap = ingest.mcap_mismatch(con) if rows and "market_cap" in {
+            r[0] for r in con.execute("DESCRIBE prices").fetchall()} else []
     finally:
         con.close()
     out.update(rows=rows, tickers=tickers, loads=[
@@ -330,13 +224,6 @@ def market() -> dict:
     return out
 
 
-def built_anchors() -> list[str]:
-    root = app.config["PORTFOLIO"] / "baseline"
-    return sorted(p.name for p in root.iterdir()
-                  if p.is_dir() and DATE.match(p.name) and (p / ALLOC).exists()) \
-        if root.exists() else []
-
-
 def stamp(path: Path) -> str | None:
     if not path.exists():
         return None
@@ -344,25 +231,10 @@ def stamp(path: Path) -> str | None:
             .tz_convert(None).strftime("%Y-%m-%d %H:%M UTC"))
 
 
-def freshness() -> dict:
-    """Built anchor -> names of the inputs newer than its params or baseline."""
-    db, pdir = app.config["DB"], app.config["PARAMS"]
-    root = app.config["PORTFOLIO"] / "baseline"
-    out = {}
-    for a in built_anchors():
-        pp = pdir / f"{a}.csv"
-        why = [p.name for p in newer_than(pp, db, GROUP_MAP, params_mod.FOL)]
-        if newer_than(root / a / ALLOC, pp):
-            why.append(pp.name)
-        if why:
-            out[a] = why
-    return out
-
-
 def unmapped() -> list[str]:
     """Tickers on the latest session that group_map_live.csv lacks or leaves blank."""
-    db = app.config["DB"]
-    if db is None or not db.exists() or not GROUP_MAP.exists():
+    db = db_path()
+    if db is None or not GROUP_MAP.exists():
         return []
     con = duckdb.connect(db, read_only=True)
     try:
@@ -375,41 +247,60 @@ def unmapped() -> list[str]:
     return sorted(on - set(g.loc[g["group"] != "", "ticker"]))
 
 
-def refork(home: Path, anchor: str) -> dict | None:
-    """Does the anchor's baseline grid differ from input/? If so, what a re-fork
-    carries and loses (portfolio.carry's report). None when either grid is missing."""
-    src = app.config["PORTFOLIO"] / "baseline" / anchor / GRID
-    inp = home / "input" / GRID
-    if not src.exists() or not inp.exists():
+def universe_summary() -> dict | None:
+    """The latest session's universe for the Data tab: groups by float-cap weight,
+    the median 21-day turnover, how many names have a FOL limit."""
+    if db_path() is None:
         return None
-    base, old_input = read_grid(src), read_grid(inp)
-    if base == old_input:
-        return {"needed": False}
-    old_book = read_grid(home / BOOK) if (home / BOOK).exists() else None
-    _, _, rep = pf.carry(base, old_book, old_input)
-    return {"needed": True, "lost": rep["lost"], "appeared": rep["appeared"]}
+    try:
+        frame = params_mod.at(app.config["DB"])
+    except BookError as e:
+        return {"error": str(e)}
+    total = float(frame["float_cap"].sum())
+    g = frame.groupby("group").agg(n=("ticker", "size"), fcap=("float_cap", "sum"))
+    g = g.sort_values("fcap", ascending=False)
+    to = frame["turnover_21_pct"].dropna()
+    return {"as_of": str(frame.attrs["session"]), "tickers": len(frame),
+            "groups": [{"name": n, "n": int(r.n), "fcap": float(r.fcap) / 1e9,
+                        "weight": float(r.fcap) / total} for n, r in g.iterrows()],
+            "median_to": float(to.median()) if len(to) else None,
+            "fol": int(frame["fol_limit"].notna().sum()),
+            "no_float_cap": frame.attrs.get("no_float_cap", [])}
 
 
-def universe(anchor: str) -> dict:
-    """Groups of one anchor's baseline with float cap (bn VND), turnover, names."""
-    root = app.config["PORTFOLIO"] / "baseline" / anchor
-    pp = app.config["PARAMS"] / f"{anchor}.csv"
-    if not (root / GRID).exists() or not pp.exists():
-        raise BookError(f"no baseline for {anchor}; fork onto it to build one")
-    grid = read_grid(root / GRID)
-    alloc = pd.read_csv(root / ALLOC).set_index("group")
-    par = pd.read_csv(pp).set_index("ticker")
-    groups, names = [], {}
-    for j, g in enumerate(grid[2]):
+def priced_universe(profiles: list[dict]) -> set:
+    """Tickers of the universe the last decision was priced on; empty without one."""
+    last = profiles[-1] if profiles else None
+    if not last or not last.get("priced_as_of"):
+        return set()
+    try:
+        return set(params_mod.at(app.config["DB"], last["priced_as_of"])["ticker"])
+    except BookError:
+        return set()
+
+
+def universe_json(home: Path, frame: pd.DataFrame, profiles: list[dict]) -> dict:
+    """One session's universe: groups with float-cap weight and members with float
+    cap (bn VND), turnover, FOL limit, flags and whether they are new."""
+    par = frame.set_index("ticker")
+    total = float(par["float_cap"].sum())
+    before = priced_universe(profiles)
+    flags: dict = {}
+    for f in pf.screen_flags(frame, frame["ticker"], load_screens(home)):
+        flags.setdefault(f["t"], []).append(f)
+    groups = []
+    for g, ts in params_mod.universe(frame).items():
         members = []
-        for t in grid_column(grid, j):
-            to = par.at[t, "turnover_21_pct"]
+        for t in ts:
+            to, fol = par.at[t, "turnover_21_pct"], par.at[t, "fol_limit"]
             members.append({"t": t, "fcap": float(par.at[t, "float_cap"]) / 1e9,
-                            "to": None if pd.isna(to) else float(to)})
-            names[t] = str(par.at[t, "company_name"])
-        groups.append({"name": g, "weight": float(alloc.at[g, "weight"]),
+                            "to": None if pd.isna(to) else float(to),
+                            "fol": None if pd.isna(fol) else float(fol),
+                            "new": bool(before) and t not in before})
+        groups.append({"name": g, "weight": float(par.loc[ts, "float_cap"].sum()) / total,
                        "members": members})
-    return {"anchor": anchor, "groups": groups, "co": names}
+    return {"as_of": str(frame.attrs["session"]), "groups": groups, "flags": flags,
+            "co": {t: str(par.at[t, "company_name"]) for t in par.index}}
 
 
 def preview_json(res: dict) -> dict:
@@ -426,9 +317,10 @@ def preview_json(res: dict) -> dict:
                  "w": float(r.target_weight), "fcap": float(r.fcap) / 1e9,
                  "pin": r.pin} for r in hold.itertuples()]
     return {"ok": True, "rows": rows, "holdings": holdings, "n": len(holdings),
+            "as_of": str(res["as_of"]), "requested": res["requested"],
             "in_range": res["in_range"], "range_note": res["range_note"],
             "cap_note": res["cap_note"], "tac_note": res["tac_note"],
-            "report": res["report"], "messages": res["messages"],
+            "report": res["report"], "messages": res["messages"], "drops": res["reconcile"],
             "active": {k: act[k] for k in ("net_pp", "used_pp", "budget_pp", "faults")}}
 
 
@@ -445,7 +337,7 @@ def stats_json(s: dict) -> dict:
 def backtest_json(res: dict) -> dict:
     eq = res["equity"]
     return {
-        "ok": True, "name": res["name"], "anchor": str(res["anchor"]),
+        "ok": True, "name": res["name"], "as_of": str(res["as_of"]),
         "start": str(res["start"]), "end": str(res["end"]), "benchmark": res["benchmark"],
         "config": res["config"], "rebalance": res["rebalance"],
         "holdings_range": res["holdings_range"], "constraints": res["constraints"],
@@ -455,28 +347,37 @@ def backtest_json(res: dict) -> dict:
         "benchmarks": {c: {"equity": [float(v) for v in b["equity"]], "stats": stats_json(b["stats"])}
                        for c, b in res["benchmarks"].items()},
         "rebalances": [{"decision": str(r.decision), "fill": str(r.fill), "trigger": r.trigger,
+                        "also": r.also, "profile": r.profile,
+                        "deferred_from": r.deferred_from,
+                        "policy": r.policy, "target_as_of": str(r.target_as_of),
                         "drift": num(r.group_drift), "turnover": float(r.turnover),
                         "cost": float(r.cost), "holdings": int(r.holdings),
-                        "in_range": bool(r.in_range), "gone": r.gone}
+                        "in_range": bool(r.in_range), "dropped": r.dropped}
                        for r in res["rebalances"].itertuples()],
         "holdings_end": [{"t": r.ticker, "group": r.group, "w": float(r.weight),
                           "target": float(r.target)} for r in res["holdings_end"].itertuples()],
+        "timeline": None if res["timeline"] is None else [
+            {**d, "placed": d["placed"] and str(d["placed"]),
+             "applied": d["applied"] and str(d["applied"])} for d in res["timeline"]],
     }
 
 
 def summary(name: str) -> dict:
     home = app.config["PORTFOLIO"] / name
-    out = {"name": name, "statement": None, "anchor": None, "error": None,
-           "constraints_on": [], "refork": None,
+    out = {"name": name, "statement": None, "error": None, "constraints_on": [],
+           "decisions": 0, "last": None,
            "built_at": read_kv(home / "target" / "built_from.txt").get("built_at")}
     try:
         out["statement"] = load_statement(home)
         out["constraints_on"] = [k for k in CAPS if load_constraints(home)[k]["on"]]
-        out["anchor"] = portfolio_anchor(home)
-        out["refork"] = refork(home, out["anchor"])
-        p = preview_json(target.compute(name, app.config["PORTFOLIO"],
-                                        app.config["PARAMS"]))
-        out.update(n=p["n"], top=p["rows"][0] if p["rows"] else None)
+        profiles = load_decisions(home)
+        out["decisions"] = len(profiles)
+        if profiles:
+            out["last"] = {k: profiles[-1].get(k) for k in ("id", "kind", "effective")}
+        if db_path() is not None:
+            p = preview_json(target.compute(name, app.config["PORTFOLIO"], app.config["DB"],
+                                            strict=False))
+            out.update(n=p["n"], top=p["rows"][0] if p["rows"] else None)
     except (BookError, ValueError, OSError) as e:
         out["error"] = str(e)
     return out
@@ -485,18 +386,45 @@ def summary(name: str) -> dict:
 def portfolio_names() -> list[str]:
     root = app.config["PORTFOLIO"]
     return sorted(p.name for p in root.iterdir()
-                  if p.is_dir() and p.name != "baseline" and pf.NAME.match(p.name))
+                  if p.is_dir() and pf.NAME.match(p.name) and (p / STATEMENT).exists())
 
 
-def detail(name: str) -> dict:
+def decisions_json(home: Path, profiles: list[dict], cols: dict | None) -> list[dict]:
+    """The decision log, each profile with its report against today's universe."""
+    try:
+        today = setup_hash(home)
+    except BookError:
+        today = None
+    return [{k: d.get(k) for k in DECISION_COLS}
+            | {"groups": d["groups"], "tactical": d.get("tactical") or {"on": False, "groups": []},
+               "holdings": d.get("holdings"), "flags": d.get("flags"),
+               "setup_differs": bool(d.get("setup_hash")) and today is not None
+               and d["setup_hash"] != today,
+               "report": pf.evaluate(d, cols)[1] if cols is not None else None}
+            for d in profiles]
+
+
+def head_matches(spec: dict | None, profiles: list[dict]) -> bool | None:
+    """Does book.json equal the latest profile, both normalized? None when there
+    is no decision, no book.json, or either side does not validate."""
+    if not profiles or spec is None:
+        return None
+    last = {"groups": profiles[-1]["groups"], "tactical": profiles[-1].get("tactical")}
+    try:
+        return pf.normalize_book(spec)[0] == pf.normalize_book(last)[0]
+    except BookError:
+        return None
+
+
+def detail(name: str, as_of: str | None = None) -> dict:
     home = app.config["PORTFOLIO"] / name
     out = {"name": name, "errors": [], "statement": None,
-           "constraints": default_constraints(), "anchor": None, "forked": {},
-           "universe": None, "book": None, "tactical": {"on": False, "groups": []},
-           "refork": None, "versions": {k: version(home, k) for k in VERSIONED},
-           "invalid": read_rows(home / "screen" / pf.INVALID),
-           "exclusions": read_rows(home / "screen" / "exclusions.csv")}
-    for key, fn in (("statement", load_statement), ("constraints", load_constraints)):
+           "constraints": default_constraints(), "screens": default_screens(),
+           "book": None, "universe": None, "latest": None,
+           "versions": {k: version(home, k) for k in VERSIONED},
+           "decisions": [], "head_matches_book": None, "setup_hash": None}
+    for key, fn in (("statement", load_statement), ("constraints", load_constraints),
+                    ("screens", load_screens)):
         try:
             v = fn(home)
             if v is not None:
@@ -504,37 +432,32 @@ def detail(name: str) -> dict:
         except BookError as e:
             out["errors"].append(str(e))
     try:
-        out["anchor"] = portfolio_anchor(home)
+        out["setup_hash"] = setup_hash(home)
     except BookError:
-        return out
-    out["forked"] = read_kv(home / "input" / FORKED)
+        pass
+    spec = None
     try:
-        out["universe"] = universe(out["anchor"])
-        out["refork"] = refork(home, out["anchor"])
+        spec = pf.read_book(home)
+        out["book"] = pf.normalize_book(spec)[0] if spec is not None else None
     except BookError as e:
-        out["errors"].append(str(e))
-    if (home / BOOK).exists():
-        book = read_grid(home / BOOK)
-        out["book"] = {}
-        try:
-            for j, g in enumerate(book[2]):
-                out["book"][g] = {"rating": book[1][j],
-                                  "pp": cell_pp(book[0][j] if j < len(book[0]) else ""),
-                                  "investable": grid_column(book, j)}
-        except (IndexError, ValueError) as e:
-            out["errors"].append(f"{BOOK} is malformed: {e}")
+        out["errors"].append(f"{BOOK}: {e}")
     try:
-        on, _ = read_switch(home / TAC_SWITCH, "tactical_group")
-        out["tactical"]["on"] = on
-        if (home / TAC).exists():
-            g = read_grid(home / TAC)
-            out["tactical"]["groups"] = [
-                {"name": n, "rating": g[1][j],
-                 "pp": cell_pp(g[0][j] if j < len(g[0]) else ""),
-                 "members": grid_column(g, j)} for j, n in enumerate(g[2])] \
-                if len(g) >= 3 else []
-    except (BookError, IndexError, ValueError) as e:
-        out["errors"].append(f"{TAC}: {e}")
+        profiles = load_decisions(home)
+    except (BookError, OSError) as e:
+        out["errors"].append(str(e))
+        profiles = []
+    cols = None
+    if db_path() is not None:
+        try:
+            out["latest"] = session_list()[-1]
+            frame = params_mod.at(app.config["DB"], as_of)
+            out["universe"] = universe_json(home, frame, profiles)
+            cols = params_mod.universe(params_mod.at(app.config["DB"]))
+        except BookError as e:
+            out["errors"].append(str(e))
+    out["decisions"] = decisions_json(home, profiles, cols)
+    out["head_matches_book"] = head_matches(out["book"] if spec is not None else None,
+                                            profiles)
     return out
 
 
@@ -557,10 +480,8 @@ def body() -> dict:
 
 
 def home_of(name: str) -> Path:
-    if name == "baseline" or not pf.NAME.match(name):
-        abort(404)
     home = app.config["PORTFOLIO"] / name
-    if not home.is_dir():
+    if not pf.NAME.match(name) or not home.is_dir():
         abort(404)
     return home
 
@@ -582,6 +503,14 @@ def reply(ok: bool, log: str, **extra):
     return jsonify(ok=ok, log=log, **extra), (200 if ok else 422)
 
 
+def date_arg(v, what: str = "date"):
+    if v is None or v == "":
+        return None
+    if not (isinstance(v, str) and DATE.match(v)):
+        raise BookError(f"{what} {v!r} is not YYYY-MM-DD")
+    return v
+
+
 # ---------- routes ----------
 
 @app.get("/")
@@ -592,21 +521,8 @@ def index():
 @app.get("/api/state")
 def state():
     with LOCK:
-        ss = sessions()
-        try:
-            sticky = baseline.sticky_anchor(app.config["DB"]) if ss else None
-        except BookError:
-            sticky = None
-        base = None
-        if sticky:
-            try:
-                base = universe(sticky)
-            except BookError:
-                pass
-        return jsonify(market=market(), sessions=ss, eligible=ss[params_mod.WINDOW - 1:],
-                       sticky=sticky, anchors=built_anchors(), baseline=base,
-                       stale=freshness(), unmapped=unmapped(),
-                       group_map={"edited": stamp(GROUP_MAP)},
+        return jsonify(market=market(), sessions=session_list(), unmapped=unmapped(),
+                       universe=universe_summary(), group_map={"edited": stamp(GROUP_MAP)},
                        portfolios=[summary(n) for n in portfolio_names()])
 
 
@@ -616,24 +532,14 @@ def run_ingest():
     return reply(ok, log)
 
 
-@app.post("/api/run/baseline")
-def run_baseline():
-    d = body().get("date")
-    if d is not None and not (isinstance(d, str) and DATE.match(d)):
-        return reply(False, f"FAIL  date {d!r} is not YYYY-MM-DD\n")
-    argv = ["--date", d] if d else []
-    ok, log, _ = run(params_mod.main, argv)
-    if ok:
-        ok, more, _ = run(baseline.main, argv)
-        log += more
-    return reply(ok, log)
-
-
 @app.get("/api/p/<name>")
 def get_portfolio(name):
     home_of(name)
+    as_of = request.args.get("as_of") or None
+    if as_of is not None and not DATE.match(as_of):
+        abort(400)
     with LOCK:
-        return jsonify(detail(name))
+        return jsonify(detail(name, as_of))
 
 
 @app.post("/api/p")
@@ -652,63 +558,93 @@ def delete_portfolio(name):
     return reply(ok, log)
 
 
-@app.put("/api/p/<name>/statement")
-def save_statement(name):
+def save_json(name: str, key: str, fname: str, validate):
     home = home_of(name)
-
     b = body()
 
-    def save(s):
-        validate_statement(s)
-        check_version(home, "statement", b.get("version"))
-        atomic_text(home / STATEMENT, dump(s))
-        print(f"OK    saved portfolio/{name}/{STATEMENT}")
-    ok, log, _ = run(save, b.get("statement"))
-    return reply(ok, log)
+    def save(obj):
+        valid = validate(obj)
+        if key == "screens":             # every screen present; the others save as sent
+            obj = valid
+        check_version(home, key, b.get("version"))
+        atomic_text(home / fname, dump(obj))
+        print(f"OK    saved portfolio/{name}/{fname}")
+    ok, log, _ = run(save, b.get(key))
+    return reply(ok, log, version=version(home, key))
+
+
+@app.put("/api/p/<name>/statement")
+def save_statement(name):
+    return save_json(name, "statement", STATEMENT, validate_statement)
 
 
 @app.put("/api/p/<name>/constraints")
 def save_constraints(name):
-    home = home_of(name)
+    return save_json(name, "constraints", CONSTRAINTS, validate_constraints)
 
-    b = body()
 
-    def save(c):
-        validate_constraints(c)
-        check_version(home, "constraints", b.get("version"))
-        atomic_text(home / CONSTRAINTS, dump(c))
-        print(f"OK    saved portfolio/{name}/{CONSTRAINTS}")
-    ok, log, _ = run(save, b.get("constraints"))
-    return reply(ok, log)
+@app.put("/api/p/<name>/screens")
+def save_screens(name):
+    return save_json(name, "screens", SCREENS_FILE, validate_screens)
 
 
 @app.put("/api/p/<name>/book")
 def save_book(name):
     home = home_of(name)
+    b = body()
 
-    def save(spec):
-        if not (home / "input" / GRID).exists():
-            raise BookError(f"{name} is not forked yet")
-        _, tac = grids_from_spec(home, spec)
-        header, cols, t_head, t_cols = tac["_parts"]
-        check_version(home, "book", spec.get("version"))
-        atomic_grid(home / BOOK, header, cols)
+    def save():
+        spec = {"groups": b.get("groups", {}), "tactical": b.get("tactical")}
+        pf.normalize_book(spec, pf.group_map())            # validate before the version
+        check_version(home, "book", b.get("version"))
+        flipped = pf.write_book(home, spec)
         print(f"OK    saved portfolio/{name}/{BOOK}")
-        flipped = [g for g, r in zip(header[2], header[1])
-                   if r == "NO" and spec.get("groups", {}).get(g, {}).get("rating") != "NO"]
         for g in flipped:
             print(f"WARN  {g}: no investable name left, rated NO")
-        if t_head[2]:
-            atomic_grid(home / TAC, t_head, t_cols)
-            print(f"OK    saved portfolio/{name}/{TAC}  {len(t_head[2])} group(s)")
-        elif (home / TAC).exists():
-            (home / TAC).unlink()
-            print(f"OK    removed portfolio/{name}/{TAC}  (no tactical groups)")
-        if tac["on"] or (home / TAC_SWITCH).exists():    # absent already means off
-            atomic_text(home / TAC_SWITCH,
-                        json.dumps({"tactical_group": "yes" if tac["on"] else "no"}) + "\n")
-        print(f"      tactical overlay {'on' if tac['on'] else 'off'}")
-    ok, log, _ = run(save, body())
+        on = bool((spec.get("tactical") or {}).get("on"))
+        print(f"      tactical overlay {'on' if on else 'off'}")
+    ok, log, _ = run(save)
+    return reply(ok, log, version=version(home, "book"))
+
+
+@app.get("/api/p/<name>/decisions")
+def get_decisions(name):
+    home = home_of(name)
+    with LOCK:
+        try:
+            profiles = load_decisions(home)
+            cols = (params_mod.universe(params_mod.at(app.config["DB"]))
+                    if db_path() is not None else None)
+            spec = pf.read_book(home)
+            return jsonify(ok=True, decisions=decisions_json(home, profiles, cols),
+                           head_matches_book=head_matches(spec, profiles))
+        except (BookError, OSError) as e:
+            return jsonify(ok=False, error=str(e))
+
+
+@app.post("/api/p/<name>/decisions")
+def record_decision(name):
+    home = home_of(name)
+    b = body()
+
+    def save():
+        if b.get("dirty"):
+            raise BookError("the book has unsaved edits; save it first, a decision "
+                            "records the book as saved")
+        check_version(home, "book", b.get("version"))
+        eff = date_arg(b.get("effective"), "effective date")
+        d = pf.record_decision(home, eff, b.get("kind"), str(b.get("note") or ""),
+                               db=app.config["DB"])
+        target.build(name, app.config["PORTFOLIO"], app.config["DB"], as_of=d["effective"])
+        return d["id"]
+    ok, log, did = run(save)
+    return reply(ok, log, id=did)
+
+
+@app.post("/api/p/<name>/reset")
+def reset(name):
+    home = home_of(name)
+    ok, log, _ = run(pf.reset, home)
     return reply(ok, log)
 
 
@@ -718,62 +654,33 @@ def preview(name):
     b = body()
 
     def calc():
-        book = tac = None
-        if "groups" in b:
-            book, tac = grids_from_spec(home, b)
-            tac = {"on": tac["on"], "grid": tac["grid"]}
-        return preview_json(target.compute(name, app.config["PORTFOLIO"],
-                                           app.config["PARAMS"], book=book,
-                                           tactical=tac,
-                                           constraints=b.get("constraints"),
-                                           strict=False))
+        as_of = date_arg(b.get("as_of"), "effective date")
+        spec = ({"groups": b.get("groups", {}), "tactical": b.get("tactical")}
+                if "groups" in b else None)
+        res = target.compute(name, app.config["PORTFOLIO"], app.config["DB"], as_of=as_of,
+                             spec=spec, constraints=b.get("constraints"), strict=False)
+        out = preview_json(res)
+        out["universe"] = universe_json(home, res["params"], load_decisions(home))
+        return out
     ok, log, res = run(calc)
     if not ok:
         return jsonify(ok=False, error=log.removeprefix("FAIL  ").strip())
     return jsonify(res)
 
 
-@app.post("/api/p/<name>/fork")
-def fork(name):
+@app.get("/api/p/<name>/monitor")
+def monitor(name):
     home_of(name)
-    anchor = body().get("anchor")
-    if anchor is not None:
-        try:
-            anchor = date.fromisoformat(str(anchor)).isoformat()
-        except ValueError:
-            return reply(False, f"FAIL  anchor {anchor!r} is not a YYYY-MM-DD date\n")
-    ok, log, rep = run(pf.fork, name, anchor, app.config["PORTFOLIO"],
-                       db=app.config["DB"], params_dir=app.config["PARAMS"])
-    return reply(ok, log, report=rep)
 
-
-@app.post("/api/p/<name>/screen")
-def screen(name):
-    home = home_of(name)
-    b = body()
-
-    def go():
-        if "screens" in b:
-            s = load_statement(home)
-            if s is None:
-                raise BookError(f"no {STATEMENT} in {home}")
-            s["screens"] = b["screens"]
-            validate_statement(s)
-            atomic_text(home / STATEMENT, dump(s))
-            print(f"OK    saved screens in portfolio/{name}/{STATEMENT}")
-        pf.screen(name, invalidate=b.get("invalidate") or None,
-                  invalidate_all=bool(b.get("invalidate_all")),
-                  restore=b.get("restore") or None,
-                  portfolio=app.config["PORTFOLIO"], params_dir=app.config["PARAMS"])
-    ok, log, _ = run(go)
-    return reply(ok, log)
-
-
-@app.post("/api/p/<name>/build")
-def build(name):
-    home_of(name)
-    ok, log, _ = run(target.build, name, app.config["PORTFOLIO"], app.config["PARAMS"])
-    return reply(ok, log)
+    def calc():
+        m = backtest_engine.monitor(name, app.config["PORTFOLIO"], app.config["DB"])
+        m["now"] = m["now"] and {k: (num(v) if isinstance(v, float) else v)
+                                 for k, v in m["now"].items()}
+        return m
+    ok, log, res = run(calc)
+    if not ok:
+        return jsonify(ok=False, error=log.removeprefix("FAIL  ").strip())
+    return jsonify(ok=True, **res)
 
 
 @app.get("/api/p/<name>/backtest")
@@ -792,7 +699,7 @@ def get_backtest(name):
 
 @app.post("/api/p/<name>/backtest")
 def run_backtest(name):
-    home_of(name)
+    home = home_of(name)
     b = body()
     start, bench = b.get("start"), b.get("benchmark", "VNINDEX")
     if start is not None and not (isinstance(start, str) and DATE.match(start)):
@@ -801,9 +708,10 @@ def run_backtest(name):
         return jsonify(ok=False, error="benchmark must be an index code")
 
     def calc():
+        timeline = None if b.get("mechanical") else load_decisions(home) or None
         return backtest_json(backtest_engine.run(
             name, start, bench, config=b.get("config"), portfolio=app.config["PORTFOLIO"],
-            params_dir=app.config["PARAMS"], db=app.config["DB"] or DB))
+            db=app.config["DB"] or DB, timeline=timeline))
     ok, log, res = run(calc)
     if not ok:
         return jsonify(ok=False, error=log.removeprefix("FAIL  ").strip())

@@ -1,11 +1,10 @@
-import json
-
 import duckdb
 import ingest
 import pandas as pd
 import params
 import pytest
-from conftest import make_rows
+from common import BookError, sessions, snap
+from conftest import ANCHOR, make_db, make_rows
 
 
 @pytest.fixture
@@ -53,13 +52,31 @@ def test_ticker_missing_from_map_fails(con):
             columns=["ticker", "fol_limit"]))
 
 
-def test_anchor_resolution(tmp_path):
-    s = {pd.Timestamp("2026-01-05").date(), pd.Timestamp("2026-01-06").date()}
-    cfg = tmp_path / "anchor.json"
-    assert params.resolve_anchor(s, None, cfg)[1] == "latest"
-    cfg.write_text(json.dumps({"anchor_date": "2026-01-05"}))
-    assert str(params.resolve_anchor(s, None, cfg)[0]) == "2026-01-05"
-    cfg.write_text(json.dumps({"anchor_date": "2025-12-31"}))
-    assert params.resolve_anchor(s, None, cfg)[1] == "latest"
-    with pytest.raises(ValueError):
-        params.resolve_anchor(s, "2026-02-01", cfg)
+def test_at_snaps_caches_and_leaves_out_no_float_cap(root):
+    db = root / "m.db"
+    assert sessions(db)[-1] == ANCHOR and str(snap(db, "2026-08-01")) == "2026-07-31"
+    a = params.at(db, "2026-08-01")
+    assert str(a.attrs["session"]) == "2026-07-31" and len(a) == 5
+    assert params.at(db, "2026-08-01") is not a and len(params._CACHE) == 1   # a copy, cached
+    assert params.universe(a) == {"G1": ["AAA", "BBB"], "G2": ["CCC", "DDD"], "G3": ["EEE"]}
+    make_db(root, fcap={("2026-09-10", "EEE"): 0, (str(ANCHOR), "DDD"): None})
+    b = params.at(db)
+    assert sorted(b["ticker"]) == ["AAA", "BBB", "CCC"] and b.attrs["no_float_cap"] == ["EEE"]
+    with pytest.raises(BookError, match="before the first session"):
+        params.at(db, "2020-01-01")
+
+
+def test_group_map_edit_needs_no_rebuild(root):
+    db = root / "m.db"
+    assert params.universe(params.at(db))["G3"] == ["EEE"]
+    gm = pd.read_csv(root / "group_map.csv")
+    gm.loc[gm["Ticker"] == "EEE", "Exclusive group"] = "G2"
+    gm.to_csv(root / "group_map.csv", index=False)
+    assert params.universe(params.at(db))["G2"] == ["CCC", "DDD", "EEE"]
+
+
+def test_run_writes_the_cache_file(root):
+    out = root / "params_out"
+    session, path, df = params.run("2026-08-01", db=root / "m.db", out_dir=out)
+    assert str(session) == "2026-07-31" and path == out / "2026-07-31.csv"
+    assert len(pd.read_csv(path)) == len(df) == 5
