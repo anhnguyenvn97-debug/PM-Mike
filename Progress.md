@@ -5,6 +5,28 @@ left) and `HANDOFF.md` (the pre-rebuild system, now reference only).
 
 ---
 
+## 2026-09-22 — D64: a decision trades as recorded
+
+- `backtest_engine.place()` puts a decision on the last session on or before
+  its effective date (was: the first on or after). A weekend decision is
+  decided on Friday's close, the session Record priced it on, and fills at
+  Monday's open with the recorded book. Weekday dates are unchanged.
+- The first decision after the backtest start opens the window (illustration)
+  and also fires as a decision fill on its own session; the timeline reports
+  that session as placed and applied, and `n_decision` counts it.
+- `simulate()`: a decision filling at the open of a calendar boundary, or in
+  flight across it, is marked `also = calendar` and the period's calendar
+  rebalance is not traded again.
+- `monitor()` starts at the same session; status reads "priced X, filled Y,
+  held to Z".
+- The backtest start date follows the same rule (was: first session on or
+  after), in `run()` and the desk's start hint (`btSnap`), so a start on a
+  weekend inception date opens on the Friday it was priced on.
+- finance_advance (inception Sat 2026-08-01): Backtest now shows decision
+  07-31 -> fill 08-03 (also calendar), n_decision 1; Monitor fills at 08-03's
+  open with 100% turnover; a backtest started 08-01 opens 07-31 and matches
+  the Monitor (+4.64%). Tests: 4 updated, 3 added (144 pass).
+
 ## 2026-09-21 — v2: date-driven portfolio, setup / loop desk (D57-D63; Step 17 A-D)
 
 Spec: `docs/plan_v2.md`. Built in one pass, gated on the Step 16 numbers.

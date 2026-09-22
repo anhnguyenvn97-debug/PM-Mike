@@ -1149,8 +1149,9 @@ async function btRun(){
 }
 function btSnap(iso){
   const ss = S.state.sessions;
-  if (!iso) return ss[0];
-  return ss.find(s => s >= iso) ?? null;
+  if (!iso || iso < ss[0]) return ss[0];
+  if (iso > ss.at(-1)) return null;
+  return ss.findLast(s => s <= iso);          // on or before, like the engine (D64)
 }
 
 function niceTicks(lo, hi, count){

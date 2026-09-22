@@ -265,10 +265,11 @@ def test_statistics_against_benchmark(root):
     assert s["n_calendar"] == 0 and s["turnover"] == 0
 
 
-def test_start_snaps_forward_and_window_guards(root):
+def test_start_snaps_back_and_window_guards(root):
     make(root)
     make_db(root, bench_gap=pd.Timestamp("2026-09-09"))
-    assert str(bt(root, "2026-08-01")["start"]) == "2026-08-03"  # Saturday -> Monday
+    assert str(bt(root, "2026-08-01")["start"]) == "2026-07-31"  # Saturday -> Friday (D64)
+    assert str(bt(root, "2026-08-03")["start"]) == "2026-08-03"  # a session stays
     res = bt(root, "2020-01-01")
     assert str(res["start"]) == "2026-06-01" and "before the history" in res["messages"][0]
     with pytest.raises(BookError, match="leaves 2 session"):
@@ -362,24 +363,57 @@ def test_decisions_before_the_window_collapse_to_the_start(root):
                                                                "b": "applied"}
 
 
-def test_first_decision_after_the_start_opens_the_window(root):
+def test_first_decision_after_the_start_opens_the_window_and_trades_on_its_date(root):
     home = make(root, rebalance={"frequency": "1Q", "drift_threshold": None})
     make_db(root)
     res = bt(root, "2026-07-01", timeline=[profile(home, "t0", "2026-07-15", **TILT)])
-    assert triggers(res) == [("2026-07-01", "2026-07-02", "inception")]
-    assert res["rebalances"].iloc[0].profile == "t0"
-    assert any("opens the window" in m for m in res["messages"])
+    assert triggers(res) == [("2026-07-01", "2026-07-02", "inception"),
+                             ("2026-07-15", "2026-07-16", "decision")]
+    assert list(res["rebalances"]["profile"]) == ["t0", "t0"]
+    assert any("opens the window as an illustration and trades as recorded from 2026-07-15"
+               in m for m in res["messages"])
+    assert [(d["id"], str(d["placed"]), str(d["applied"])) for d in res["timeline"]] == [
+        ("t0", "2026-07-15", "2026-07-15")]
+    assert res["stats"]["n_decision"] == 1
 
 
-def test_decision_on_a_calendar_boundary_is_one_fill(root):
+def test_weekend_decision_is_decided_on_friday_and_covers_the_calendar(root):
     home = make(root, rebalance={"frequency": "1M", "drift_threshold": None})
     make_db(root)
     res = bt(root, "2026-07-01", timeline=[profile(home, "a", "1900-01-01"),
                                            profile(home, "b", "2026-08-01", **TILT)])
+    # Saturday 08-01: decided on Friday's close, filled at Monday's open, the
+    # first session of August, so August trades no calendar rebalance again
     assert triggers(res) == [("2026-07-01", "2026-07-02", "inception"),
-                             ("2026-08-03", "2026-08-04", "decision"),   # Saturday -> Monday
+                             ("2026-07-31", "2026-08-03", "decision"),
                              ("2026-09-01", "2026-09-02", "calendar")]
+    reb = res["rebalances"]
+    assert reb.iloc[1].also == "calendar" and str(reb.iloc[1].target_as_of) == "2026-07-31"
+
+
+def test_decision_in_flight_on_a_calendar_boundary_covers_it(root):
+    home = make(root, rebalance={"frequency": "1M", "drift_threshold": None})
+    make_db(root)
+    cfg = {**FREE["cfg"], "lag_sessions": 2}
+    res = bt(root, "2026-07-01", cfg, timeline=[profile(home, "a", "1900-01-01"),
+                                                profile(home, "b", "2026-07-31", **TILT)])
+    assert triggers(res) == [("2026-07-01", "2026-07-03", "inception"),
+                             ("2026-07-31", "2026-08-04", "decision"),
+                             ("2026-09-01", "2026-09-03", "calendar")]
     assert res["rebalances"].iloc[1].also == "calendar"
+
+
+def test_replay_trades_the_book_as_recorded_on_a_weekend_date(root):
+    home = make(root, rebalance={"frequency": "1Q", "drift_threshold": None})  # next: 10-01
+    make_db(root, fcap={("2026-08-03", "BBB"): 40.0})     # Monday's float cap differs
+    pf.record_decision(home, "2026-07-01", db=root / "m.db")
+    set_book(home, **TILT)
+    d = pf.record_decision(home, "2026-08-01", "active", db=root / "m.db")  # a Saturday
+    assert d["priced_as_of"] == "2026-07-31"
+    res = bt(root, "2026-07-01", timeline=pf.load_decisions(home))
+    assert triggers(res)[1] == ("2026-07-31", "2026-08-03", "decision")
+    end = res["holdings_end"].set_index("ticker")["target"].to_dict()
+    assert end == pytest.approx({h["t"]: h["w"] for h in d["holdings"]})
 
 
 def test_decision_during_a_pending_fill_is_deferred(root):
@@ -461,8 +495,11 @@ def test_monitor_holds_the_last_decision_to_the_last_session(root):
     pf.record_decision(home, "2026-08-15", "active", db=root / "m.db")   # a Saturday
     m = be.monitor("p", root / "portfolio", root / "m.db")
     assert m["decision"]["id"] == "2026-08-15" and m["decision"]["kind"] == "active"
-    assert [(r["decision"], r["trigger"]) for r in m["rebalances"]] == [
-        ("2026-08-17", "inception"), ("2026-09-01", "calendar")]
+    # decided on Friday 08-14's close, as recorded; filled at Monday's open
+    assert [(r["decision"], r["fill"], r["trigger"]) for r in m["rebalances"]] == [
+        ("2026-08-14", "2026-08-17", "inception"), ("2026-09-01", "2026-09-02", "calendar")]
+    assert m["status"] == ("decision 2026-08-15 priced 2026-08-14, filled 2026-08-17, "
+                           "held to 2026-09-11")
     assert m["next_calendar"] == "2026-10-01" and m["now"]["breach"] is None
     # AAA (.42) +10% on 09-07: G1 .63 -> (.462 + .21) / 1.042
     assert m["now"]["drift"] == pytest.approx((0.462 + 0.21) / 1.042 - 0.63)

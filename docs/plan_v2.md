@@ -110,6 +110,20 @@ the tilt maths (D31–D43), the caps or the standing target (D50–D52) changes.
   holdings. With no decision recorded it says so and shows nothing else. It
   writes nothing but `screens.json`. It tracks the paper portfolio from the
   standing target, not broker fills or cash.
+- **D64 a decision trades as recorded (2026-09-22).** The engine places a
+  decision on the last session on or before its effective date, the session
+  Record priced it on (`priced_as_of`), instead of snapping forward: a Saturday
+  decision is decided on Friday's close and fills at Monday's open, trading
+  the recorded book (under an unchanged setup). A weekday date is unchanged.
+  The first decision, when later than the backtest start, still opens the
+  window as the illustration but also stays on its own session, where it
+  fires as a decision fill (it used to be moved to the start and never trade
+  on its date). A decision that fills at the open of a calendar boundary, or
+  is in flight across it, is that period's calendar rebalance (`also =
+  calendar`); the period is not traded again. Monitor starts at the same
+  session, and the backtest start date is placed the same way (last session
+  on or before), so a start on the inception date replays from its priced
+  session. Revises D52 (timing) and D61 (placement).
 
 ---
 
