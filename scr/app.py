@@ -47,7 +47,9 @@ stock sessions it lacks. Rebuild database runs ingest.main, which loads both.
 It also lists the tickers on the latest session the group map lacks (every
 calculation on that session FAILs until they are mapped) and that session's
 universe by group ("universe" in /api/state). Group map edits need no
-rebuild: the next calculation reads the file.
+rebuild: the next calculation reads the file. POST /api/open/group_map opens
+index/group_map_live.csv in the app Windows associates with .csv (a hand
+edit; the desk never writes it).
 
 Backtest tab: POST /api/p/<name>/backtest runs backtest_engine.run with the
 page's start, benchmark and unsaved trading config (nothing written) and
@@ -75,6 +77,7 @@ Usage
 """
 import contextlib
 import io
+import os
 import re
 import sys
 import threading
@@ -524,6 +527,19 @@ def state():
         return jsonify(market=market(), sessions=session_list(), unmapped=unmapped(),
                        universe=universe_summary(), group_map={"edited": stamp(GROUP_MAP)},
                        portfolios=[summary(n) for n in portfolio_names()])
+
+
+@app.post("/api/open/group_map")
+def open_group_map():
+    """Open index/group_map_live.csv in the app Windows associates with .csv
+    (the desk never writes it; the next calculation reads the saved file)."""
+    if not GROUP_MAP.exists():
+        return reply(False, f"FAIL  {GROUP_MAP} not found\n")
+    try:
+        os.startfile(GROUP_MAP)                        # Windows only
+    except (AttributeError, OSError) as e:
+        return reply(False, f"FAIL  cannot open {GROUP_MAP}: {e}\n")
+    return reply(True, f"opened {GROUP_MAP}\n")
 
 
 @app.post("/api/run/ingest")

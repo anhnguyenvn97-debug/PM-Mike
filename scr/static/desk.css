@@ -329,6 +329,8 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--accent);outline-
 .bt-key i.d{width:9px;height:9px;border:2px solid var(--accent);border-radius:50%;background:var(--surface)}
 .bt-key i.d.w{border-color:var(--warn)}
 .bt-key i.d.x{border-color:var(--uw)}
+.pend{fill:var(--warn);opacity:.14}
+.bt-key i.pend{width:12px;height:12px;border:0;background:var(--warn);opacity:.3}
 .bt-cmp th.n,.bt-cmp td.n{width:18%}
 .bt-cmp td:first-child{color:var(--ink-2)}
 .bt-mand dd{font-family:var(--sans)}

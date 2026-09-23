@@ -5,6 +5,45 @@ left) and `HANDOFF.md` (the pre-rebuild system, now reference only).
 
 ---
 
+## 2026-09-22 — Edit group map button
+
+- Market data, Universe panel: "Edit group map" (POST /api/open/group_map)
+  opens `index/group_map_live.csv` in the app Windows uses for .csv. The desk
+  still never writes the file; a refresh picks up the saved edit, and a new
+  group enters every book rated NO. Test added (145 pass).
+
+## 2026-09-22 — D66: Monitor is the forward test from inception
+
+- `simulate()` takes an optional trace list (one state per session at its
+  close); `run(daily=True)` returns it as `daily` (`backtest_engine.day`).
+  The backtest does not ask for it.
+- `monitor()` returns the whole replay from inception: `series` (portfolio,
+  benchmark), every fill, `total` since inception, `daily`, `decisions`.
+- Desk Monitor: "Forward test from inception" chart (growth of 100, excess,
+  fill markers, pending sessions shaded). Hover updates group drift, breach,
+  since inception, the standing target line and the holdings table for that
+  session; leaving the chart returns to the latest. The chart code is shared
+  with the Backtest (`growthCharts`, `chartHover`).
+- finance_advance: 28 sessions from 07-31; since inception +4.62%; on 08-14
+  drift 5.87% with the decision fill pending to the 08-17 open, 0.18% after.
+- Monitor test extended: fills, series and total equal the replay; the
+  pending day, its drift equal to the fill's group drift, the last day equal
+  to "now" (144 pass).
+
+## 2026-09-22 — D65: Monitor carries the held book
+
+- `monitor()` ran only the last decision, from cash, so a period or active
+  decision showed 100% turnover. It now replays every decision from the
+  inception's session and reports from the last decision's session: fills
+  since, the return since its close, drift, breach, next calendar date, flags.
+- finance_advance (inception 08-01, period 08-15): the 08-15 fill is 6.1%
+  turnover (was 100%), since the decision +4.05% (was +4.01%); equal to the
+  backtest started on 08-01. Test updated to check both against the replay.
+- Labels: `monitor()` passes `also`; the Monitor fill table shows "decision
+  + calendar" (and no longer renders a `decision` row as "calendar"), and the
+  Backtest log shows "inception + calendar" when the inception covers the
+  period's calendar rebalance.
+
 ## 2026-09-22 — D64: a decision trades as recorded
 
 - `backtest_engine.place()` puts a decision on the last session on or before

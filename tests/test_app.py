@@ -15,6 +15,18 @@ def client(root):
     return desk.app.test_client()
 
 
+def test_open_group_map(root, client, monkeypatch):
+    opened = []
+    monkeypatch.setattr(desk.os, "startfile", opened.append, raising=False)
+    monkeypatch.setattr(desk, "GROUP_MAP", root / "group_map.csv")
+    r = client.post("/api/open/group_map", json={})
+    assert r.status_code == 200 and opened == [root / "group_map.csv"]
+    assert client.post("/api/open/group_map").status_code == 415      # JSON body only
+    monkeypatch.setattr(desk, "GROUP_MAP", root / "missing.csv")
+    r = client.post("/api/open/group_map", json={})
+    assert r.status_code == 422 and "not found" in r.get_json()["log"] and len(opened) == 1
+
+
 def spec(**over):
     s = {"groups": {"G1": {"rating": "AV", "pp": 0, "investable": ["AAA", "BBB"]},
                     "G2": {"rating": "AV", "pp": 0, "investable": ["CCC", "DDD"]},

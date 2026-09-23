@@ -124,6 +124,24 @@ the tilt maths (D31–D43), the caps or the standing target (D50–D52) changes.
   session, and the backtest start date is placed the same way (last session
   on or before), so a start on the inception date replays from its priced
   session. Revises D52 (timing) and D61 (placement).
+- **D65 Monitor carries the held book (2026-09-22).** Monitor replays every
+  decision from the inception's session and reports from the last decision's
+  session on: its fill trades from the book actually held (the switch
+  turnover, not 100% from cash), and "since the decision" is the return from
+  that session's close. Drift, breach and flags are unchanged. The Monitor
+  now equals the backtest started on the inception date. Revises D63.
+- **D66 Monitor is the forward test from inception (2026-09-22).** The
+  Monitor shows the replay of D65 whole: growth of 100 against the
+  benchmark, every fill since inception, and the return since inception
+  (replacing "since the decision"). `run(daily=True)` keeps each session's
+  state at its close: the decision in force, the session that derived the
+  standing target, a fill decided and not yet traded (pending), group drift,
+  breach, held weights against the target. Hovering a session on the chart
+  shows that state in the figures, standing target line and holdings table;
+  leaving the chart returns to the latest session. Pending sessions (decision
+  close to fill open) are shaded: drift there is measured against the new
+  target, so it is high until the fill. Next calendar date and screen flags
+  stay on the latest session. Revises D65.
 
 ---
 

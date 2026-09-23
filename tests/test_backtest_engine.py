@@ -495,9 +495,43 @@ def test_monitor_holds_the_last_decision_to_the_last_session(root):
     pf.record_decision(home, "2026-08-15", "active", db=root / "m.db")   # a Saturday
     m = be.monitor("p", root / "portfolio", root / "m.db")
     assert m["decision"]["id"] == "2026-08-15" and m["decision"]["kind"] == "active"
-    # decided on Friday 08-14's close, as recorded; filled at Monday's open
+    # decided on Friday 08-14's close, as recorded; filled at Monday's open,
+    # trading from the inception book actually held, not from cash (D65)
+    replay = be.run("p", "2026-06-01", config=load_backtest_config(home),
+                    portfolio=root / "portfolio", db=root / "m.db",
+                    timeline=pf.load_decisions(home))
+    # the forward test from inception (D66): every fill of the replay
+    reb = replay["rebalances"]
     assert [(r["decision"], r["fill"], r["trigger"]) for r in m["rebalances"]] == [
-        ("2026-08-14", "2026-08-17", "inception"), ("2026-09-01", "2026-09-02", "calendar")]
+        (str(r.decision), str(r.fill), r.trigger) for r in reb.itertuples()]
+    assert [(r["decision"], r["fill"], r["trigger"]) for r in m["rebalances"][-2:]] == [
+        ("2026-08-14", "2026-08-17", "decision"), ("2026-09-01", "2026-09-02", "calendar")]
+    assert m["rebalances"][0]["trigger"] == "inception" and m["start"] == "2026-06-01"
+    switch = reb.set_index("decision").loc[date(2026, 8, 14)]
+    assert [r["also"] for r in m["rebalances"][-2:]] == ["", ""]
+    turn = m["rebalances"][-2]["turnover"]
+    assert turn == pytest.approx(switch.turnover) and 0 < turn < 0.2
+    nav = replay["equity"]["portfolio"]
+    assert m["series"]["portfolio"] == pytest.approx(list(nav))
+    assert m["total"] == pytest.approx(nav.iloc[-1] - 1)
+    # one state per session at its close
+    day = dict(zip(m["series"]["dates"], m["daily"]))
+    assert len(day) == len(m["daily"]) == len(replay["equity"])
+    first = m["daily"][0]
+    assert first["drift"] is None and first["pending"]["trigger"] == "inception"
+    assert day["2026-08-13"]["profile"] == "2026-06-01" and day["2026-08-13"]["pending"] is None
+    pend = day["2026-08-14"]                                   # decided, not yet traded
+    assert pend["profile"] == "2026-08-15" and pend["target_as_of"] == "2026-08-14"
+    assert pend["pending"] == {"trigger": "decision", "decision": "2026-08-14",
+                               "fill": "2026-08-17"}
+    assert pend["drift"] == pytest.approx(switch.group_drift)
+    filled = day["2026-08-17"]
+    assert filled["pending"] is None and filled["drift"] < pend["drift"]
+    assert sum(h["w"] for h in filled["holdings"]) == pytest.approx(1)
+    assert day["2026-09-01"]["target_as_of"] == "2026-09-01"
+    assert m["daily"][-1]["drift"] == pytest.approx(m["now"]["drift"])
+    assert {h["t"]: (h["w"], h["target"]) for h in m["daily"][-1]["holdings"]} == pytest.approx(
+        {h["t"]: (h["w"], h["target"]) for h in m["holdings"]})
     assert m["status"] == ("decision 2026-08-15 priced 2026-08-14, filled 2026-08-17, "
                            "held to 2026-09-11")
     assert m["next_calendar"] == "2026-10-01" and m["now"]["breach"] is None

@@ -140,13 +140,21 @@ lists each profile: id, effective, kind, note, setup_hash, placed and applied
 sessions (its own session when it also opened the window), status, evaluate
 report. Its "now" holds the end state: group drift
 of the held weights against the standing target and the first cap they break
-by more than the tolerance (None when none).
+by more than the tolerance (None when none). Its "daily" is None unless
+run(daily=True): one entry per session of the window (monitor, below).
 
-monitor(name) is the desk's Monitor (D63): run() from the last decision's
-session (placed as above, D64: priced Friday, filled Monday's open) to the
-last session with only that decision in force, reporting the
-fills since, "now", the next calendar date and the screen flags on the
-standing target's names. A decision after the history, or one too recent to
+monitor(name) is the desk's Monitor (D63, D65): run() from the inception's
+session with every decision replayed, so the last decision trades from the
+book actually held (its turnover is the switch, not a build from cash). It
+reports the forward test from the inception's session to the last session
+(D66): the growth curve against the benchmark, every fill, the return since
+inception, and per session ("daily", run(daily=True)) the state at its close:
+the decision in force, the session that derived the standing target, a fill
+decided and not yet traded (pending), group drift against the standing
+target, breach, and the held weights against the target. Its status names the
+last decision (placed as above, D64: priced Friday, filled Monday's open); it
+also holds "now", the next calendar date and the screen flags on the standing
+target's names. A decision after the history, or one too recent to
 leave lag + 2 sessions, returns only its status and the flags. It writes
 nothing and never trades anything real: the paper portfolio of the standing
 target, not broker fills or cash.
@@ -392,9 +400,13 @@ def period_keys(sessions: pd.DatetimeIndex, start: int, freq: str | None):
 
 def simulate(R: np.ndarray, sessions, start: int, freq, threshold, cfg: dict,
              regimes: list, alive: np.ndarray | None = None, names: list | None = None,
-             R_post: np.ndarray | None = None) -> tuple:
+             R_post: np.ndarray | None = None, trace: list | None = None) -> tuple:
     """NAV per session from start, fill events, final weights, standing target,
-    messages, index of the last regime applied.
+    messages, index of the last regime applied. A list passed as trace gets one
+    entry per session, the state at its close (D66): {"w", "standing" (None
+    before the first derivation), "standing_at", "k" (regime in force),
+    "pending" (None or {"trigger", "decision", "fill"} session indices),
+    "drift", "breach" (None while in cash)}.
 
     R[i] is each name's return from the close of session i-1 to the open of
     session i, R_post[i] from that open to the close (zeros when None, so R is
@@ -514,6 +526,16 @@ def simulate(R: np.ndarray, sessions, start: int, freq, threshold, cfg: dict,
                            "as_of": sessions[standing_at].date()}
             if pending is not None and lag == 0:
                 fill(i)
+        if trace is not None:
+            held = invested and standing is not None
+            trace.append({"w": w.copy(), "standing": None if standing is None else standing.copy(),
+                          "standing_at": standing_at, "k": k,
+                          "pending": None if pending is None else
+                          {"trigger": pending["trigger"], "decision": pending["decision"],
+                           "fill": pending["fill"]},
+                          "drift": drift(w, standing) if held else None,
+                          "breach": reg["breach"](w) if invested and reg["breach"] is not None
+                          else None})
         navs.append(nav)
     return navs, events, w, standing, messages, k
 
@@ -586,7 +608,7 @@ def place(timeline: list, S: pd.DatetimeIndex, i0: int) -> tuple[list, list, dic
 def run(name: str, start: str | None = None, benchmark: str = "VNINDEX",
         config: dict | None = None, portfolio: Path = PORTFOLIO,
         db: Path = DB, market: dict | None = None,
-        timeline: list | None = None) -> dict:
+        timeline: list | None = None, daily: bool = False) -> dict:
     """Backtest without writing or printing. See module docstring."""
     mk = market or load_market(db)
     S = mk["sessions"]
@@ -667,8 +689,9 @@ def run(name: str, start: str | None = None, benchmark: str = "VNINDEX",
                 "edge": lambda w, live_i: edge_fill(w, names, book["group_of"], live_i, cons)}
 
     regimes = [regime(at, d["id"], books[d["id"]]) for at, d in placed]
+    trace = [] if daily else None
     navs, events, w, tgt, notes, k = simulate(R_pre, S, i0, freq, threshold, cfg, regimes,
-                                              alive, names, R_post)
+                                              alive, names, R_post, trace)
     messages += notes
     fills = pd.DatetimeIndex([pd.Timestamp(e["fill"]) for e in events])
     hit = bad_open.loc[bad_open.index.isin(fills)]
@@ -731,7 +754,27 @@ def run(name: str, start: str | None = None, benchmark: str = "VNINDEX",
             "constraints": live["compute"]["cap_note"], "tactical": live["compute"]["tac_note"],
             "equity": equity, "rebalances": reb, "holdings_end": end,
             "stats": comps[benchmark]["stats"], "benchmarks": comps,
-            "timeline": tl if timeline is not None else None, "messages": messages}
+            "timeline": tl if timeline is not None else None, "messages": messages,
+            "daily": None if trace is None else [day(S, names, regimes, t) for t in trace]}
+
+
+def day(S, names: list, regimes: list, t: dict) -> dict:
+    """One session of simulate's trace in plain values (D66): the regime in
+    force, the session that derived the standing target, a pending fill, group
+    drift, breach and the names held or targeted with weight and target."""
+    tg = np.zeros(len(names)) if t["standing"] is None else t["standing"]
+    groups = regimes[t["k"]]["groups"]
+    p = t["pending"]
+    return {"profile": regimes[t["k"]]["id"],
+            "target_as_of": None if t["standing_at"] is None else str(S[t["standing_at"]].date()),
+            "pending": None if p is None else
+            {"trigger": p["trigger"], "decision": str(S[p["decision"]].date()),
+             "fill": str(S[p["fill"]].date())},
+            "drift": t["drift"], "breach": t["breach"],
+            "holdings": sorted(({"t": names[j], "group": groups[j], "w": float(t["w"][j]),
+                                 "target": float(tg[j])}
+                                for j in np.flatnonzero((t["w"] > EPS) | (tg > EPS))),
+                               key=lambda h: (-h["w"], -h["target"]))}
 
 
 def next_calendar(freq: str | None, start: date, last: date) -> date | None:
@@ -795,27 +838,38 @@ def monitor(name: str, portfolio: Path = PORTFOLIO, db: Path = DB,
                          f"{lag} needs {lag + 2}")
         flag_names(recorded)
         return out
+    # replay every decision from inception, so the last one trades from the
+    # book actually held, then report from its session on
+    i0 = max(int(S.searchsorted(pd.Timestamp(profiles[0]["effective"]), side="right")) - 1, 0)
     bench = next((c for c in ("VNINDEX", *sorted(mk["bench"].columns))
-                  if c in mk["bench"].columns and not mk["bench"][c].loc[S[j:]].isna().any()),
+                  if c in mk["bench"].columns and not mk["bench"][c].loc[S[i0:]].isna().any()),
                  None)
     if bench is None:
-        raise BookError(f"no benchmark has a close on every session since {S[j].date()}")
-    res = run(name, str(S[j].date()), bench, portfolio=portfolio, db=db, market=mk,
-              timeline=[last])
+        raise BookError(f"no benchmark has a close on every session since {S[i0].date()}")
+    res = run(name, str(S[i0].date()), bench, portfolio=portfolio, db=db, market=mk,
+              timeline=profiles, daily=True)
     end = res["holdings_end"]
     freq = res["rebalance"]["frequency"]
-    fills = res["rebalances"]["fill"]
+    reb = res["rebalances"]
+    since = reb[reb["decision"] >= S[j].date()]
+    eq = res["equity"]
     out.update(
-        status=(f"decision {last['id']} priced {res['start']}, filled "
-                f"{fills.iloc[0] if len(fills) else 'not yet'}, held to {res['end']}"),
+        status=(f"decision {last['id']} priced {S[j].date()}, filled "
+                f"{since['fill'].iloc[0] if len(since) else 'not yet'}, held to {res['end']}"),
         now=res["now"], messages=res["messages"],
         next_calendar=None if (d := next_calendar(freq, res["start"], latest)) is None
         else str(d),
-        frequency=freq,
-        total=res["stats"]["portfolio"]["total"],
+        frequency=freq, start=str(res["start"]), benchmark=bench,
+        total=float(eq["portfolio"].iloc[-1] - 1),
+        decisions=[{k: p.get(k) for k in ("id", "effective", "kind", "priced_as_of", "note")}
+                   for p in profiles],
+        series={"dates": [str(x) for x in eq["date"]],
+                "portfolio": [float(v) for v in eq["portfolio"]],
+                "benchmark": [float(v) for v in eq["benchmark"]]},
+        daily=res["daily"],
         rebalances=[{"decision": str(r.decision), "fill": str(r.fill), "trigger": r.trigger,
-                     "policy": r.policy, "turnover": float(r.turnover)}
-                    for r in res["rebalances"].itertuples()],
+                     "also": r.also, "profile": r.profile, "policy": r.policy,
+                     "turnover": float(r.turnover)} for r in reb.itertuples()],
         holdings=[{"t": r.ticker, "group": r.group, "w": float(r.weight),
                    "target": float(r.target)} for r in end.itertuples()])
     flag_names(end.loc[end["target"] > EPS, "ticker"])

@@ -84,9 +84,12 @@ function mandateText(r){
   return a.join(" or ") || "none";
 }
 const FLAGNAME = {turnover:"21-day turnover", float_cap:"float cap", fol:"foreign ownership limit"};
-const UNIT = {turnover:"% / day", float_cap:" bn VND", fol:"%"};
+/* a screen value in its unit: float cap in bn VND, turnover and FOL in % */
+const flagVal = (screen, v) => v === null || v === undefined ? "no data"
+  : screen === "float_cap" ? `${Math.round(+v).toLocaleString("en-US")} bn VND`
+  : screen === "turnover" ? `${(+v).toFixed(3)}%` : `${(+v).toFixed(1)}%`;
 const flagText = f => f.why === "no data" ? `${FLAGNAME[f.screen]}: no data`
-  : `${FLAGNAME[f.screen]} ${(+f.value).toPrecision(3)}${UNIT[f.screen]} below ${f.threshold}${UNIT[f.screen]}`;
+  : `${FLAGNAME[f.screen]} ${flagVal(f.screen, f.value)} below ${flagVal(f.screen, f.threshold)}`;
 function go(page, port=null, step=0){
   S.page = page; S.step = step; S.confirmDel = null; S.confirmReset = false;
   if (port && port !== S.port){ S.port = port; S.P = null; S.preview = null; S.console.flow = null; }
@@ -294,8 +297,9 @@ function renderData(){
         </div>
       </section>
       <section class="panel">
-        <div class="panel-h"><h2>Universe</h2><span class="label">${u?.as_of ? `latest session ${u.as_of}` : ""}</span></div>
+        <div class="panel-h"><h2>Universe</h2><span class="inline"><span class="label">${u?.as_of ? `latest session ${u.as_of}` : ""}</span><button class="btn primary" id="openGmap" title="Open index/group_map_live.csv in the app Windows uses for .csv">Edit group map</button></span></div>
         <div class="panel-b stack">
+          ${S.gmapMsg ? `<p class="note ${S.gmapMsg.ok ? "" : "bad"}">${esc(S.gmapMsg.text)}</p>` : ""}
           ${u?.error ? `<p class="note bad">${esc(u.error)}</p>` : ""}
           <dl class="kv">
             <dt>Group map</dt><dd>index/group_map_live.csv${u?.groups ? ` · ${u.groups.length} groups, ${u.tickers} names` : ""}${st.group_map.edited ? ` · edited ${st.group_map.edited}` : ""}</dd>
@@ -377,6 +381,12 @@ function dataChecks(st){
 }
 function bindData(){
   $("#runIngest").onclick = () => action("ingest", "POST", "/api/run/ingest", {}, async () => { await refreshState(); });
+  $("#openGmap").onclick = async () => {
+    const r = await api("POST", "/api/open/group_map", {});
+    S.gmapMsg = r.ok ? {ok:true, text:"Opened index/group_map_live.csv. Save it as CSV and close it, then refresh this page (F5): the next calculation reads it. A new group enters every book rated NO."}
+                     : {ok:false, text:(r.log || r.error || "FAIL").trim()};
+    render();
+  };
 }
 
 /* one action at a time; its log lands in S.console[key] */
@@ -795,6 +805,37 @@ function screensForm(P){
     <div class="panel-f"><span style="font-size:12.5px;color:var(--ink-3);margin-right:auto">A flag marks a risk on a name in the Allocation and Target steps and here; it never removes the name. Flags are measured at each decision's session and stored with it.</span><button class="btn primary" id="scSave">Save screen rules</button></div>
   </section>`;
 }
+/* Monitor (D63, D65, D66): the forward test from inception; hovering a session
+   shows the book on its close, leaving the chart returns to the latest */
+const MONC = {cur:null};
+const monAt = (m, i) => { i = i ?? m.daily.length - 1; const dd = m.daily[i];
+  return {i, dd, date:m.series.dates[i], latest:i === m.daily.length - 1,
+          d:(m.decisions || []).find(x => x.id === dd.profile) || m.decision}; };
+const pendText = p => `${p.trigger} decided ${p.decision}, fills at the ${p.fill} open`;
+function monKv(m, i=null){
+  const {dd, d, date, latest} = monAt(m, i);
+  return `<dl class="kv"><dt>Standing target</dt><dd>decision ${esc(d.id)} · ${esc(d.kind || "")}${d.priced_as_of ? ` · priced as of ${esc(d.priced_as_of)}` : ""}${dd.target_as_of ? ` · derived ${esc(dd.target_as_of)}` : ""}${d.note ? ` · ${esc(d.note)}` : ""}</dd>
+    <dt>${latest ? "Latest session" : "Session"}</dt><dd>${esc(date)}${latest ? "" : ` <span class="label">hovered; the latest is ${esc(m.latest)}</span>`}</dd>
+    <dt>Fill pending</dt><dd>${dd.pending ? `<span class="pill xs warn">${esc(pendText(dd.pending))}</span>` : '<span class="pill xs off">none</span>'}</dd></dl>`;
+}
+function monFigs(m, i=null){
+  const {i: k, dd} = monAt(m, i), now = m.now;
+  const ret = m.series.portfolio[k] - 1, dr = dd.drift;
+  const dsub = dr === null ? `in cash until the ${dd.pending ? dd.pending.fill + " open" : "first fill"}`
+    : dd.pending ? `vs the new target, fill pending`
+    : now.threshold != null ? `trigger at ${pct(now.threshold, 0)}` : "drift trigger off";
+  return `<div class="fig"><span class="label">Group drift</span><span class="big ${dr !== null && now.threshold != null && dr > now.threshold ? "negv" : ""}">${dr === null ? "cash" : pct(dr, 2)}</span><span class="sub">${dsub}</span></div>
+    <div class="fig"><span class="label">Breach</span><span class="big ${dd.breach ? "negv" : ""}" style="font-size:18px">${dd.breach ? "yes" : "none"}</span><span class="sub">${dd.breach ? esc(dd.breach) : now.tolerance != null ? `tolerance ${pct(now.tolerance, 0)} of a cap` : "breach off"}</span></div>
+    <div class="fig"><span class="label">Next calendar date</span><span class="big" style="font-size:18px">${m.next_calendar ?? "none"}</span><span class="sub">${m.frequency ? `${FREQ[m.frequency]}; from the latest session` : "no schedule"}</span></div>
+    <div class="fig"><span class="label">Since inception</span><span class="big ${tone(ret)}">${spct(ret)}</span><span class="sub">paper portfolio, from the ${esc(m.start)} close</span></div>`;
+}
+function monHold(m, i, byT){
+  const {dd, date, latest} = monAt(m, i);
+  return `<div class="panel-h"><h2>Holdings ${latest ? "now" : `on ${esc(date)}`}</h2><span class="label">drifted weight at the ${esc(date)} close vs the standing target${dd.pending ? "; target of the pending fill" : ""}</span></div>
+    <div class="scroll"><table><thead><tr><th>Ticker</th><th>Group</th><th class="n">Weight</th><th class="n">Target</th><th class="n">Gap</th><th>Flags <span class="label">latest</span></th></tr></thead><tbody>
+    ${dd.holdings.map(x => `<tr><td class="mono">${esc(x.t)}</td><td>${x.group ? esc(x.group) : '<span class="label">not in this book</span>'}</td><td class="n">${pct(x.w)}</td><td class="n">${pct(x.target)}</td><td class="n ${tone(x.w - x.target)}">${spp(x.w - x.target)}</td><td style="white-space:nowrap">${(byT[x.t] || []).map(f => `<span class="pill xs warn plain" title="${esc(flagText(f))}">${esc(f.screen)}</span>`).join(" ")}</td></tr>`).join("")}
+    </tbody></table></div>`;
+}
 function stepMonitor(P){
   const m = P.mon;
   let body;
@@ -802,30 +843,31 @@ function stepMonitor(P){
   else if (!m.ok) body = `<section class="panel"><div class="panel-b"><p class="note bad" style="white-space:pre-wrap">${esc(m.error)}</p></div></section>`;
   else if (!m.decision) body = `<section class="panel"><div class="panel-h"><h2>Monitor</h2></div><div class="panel-b"><p class="note">${esc(m.status)}</p></div></section>`;
   else {
-    const d = m.decision, now = m.now, fl = m.flags || [];
+    const d = m.decision, fl = m.flags || [];
     const byT = fl.reduce((a, f) => ((a[f.t] ??= []).push(f), a), {});
-    const figs = now ? `<div class="bt-figs">
-        <div class="fig"><span class="label">Group drift</span><span class="big ${now.threshold != null && now.drift > now.threshold ? "negv" : ""}">${pct(now.drift, 2)}</span><span class="sub">${now.threshold != null ? `trigger at ${pct(now.threshold, 0)}` : "drift trigger off"}</span></div>
-        <div class="fig"><span class="label">Breach</span><span class="big ${now.breach ? "negv" : ""}" style="font-size:18px">${now.breach ? "yes" : "none"}</span><span class="sub">${now.breach ? esc(now.breach) : now.tolerance != null ? `tolerance ${pct(now.tolerance, 0)} of a cap` : "breach off"}</span></div>
-        <div class="fig"><span class="label">Next calendar date</span><span class="big" style="font-size:18px">${m.next_calendar ?? "none"}</span><span class="sub">${m.frequency ? `${FREQ[m.frequency]}; the first session on or after it` : "no schedule"}</span></div>
-        <div class="fig"><span class="label">Since the decision</span><span class="big ${tone(m.total)}">${spct(m.total)}</span><span class="sub">paper portfolio, total return</span></div>
-      </div>` : "";
+    const g = m.daily ? growthCharts(m.series.portfolio, m.series.benchmark, m.series.dates, m.rebalances, "mon", true) : null;
+    if (g) MONC.cur = g.cur;
     body = `<section class="panel"><div class="panel-h"><h2>Monitor <span class="label" style="margin-left:6px">${esc(m.status)}</span></h2><button class="btn sm" id="monRefresh">Refresh</button></div>
-      <div class="panel-b"><dl class="kv"><dt>Standing target</dt><dd>decision ${esc(d.id)} · ${esc(d.kind)}${d.priced_as_of ? ` · priced as of ${esc(d.priced_as_of)}` : ""}${d.note ? ` · ${esc(d.note)}` : ""}</dd><dt>Latest session</dt><dd>${esc(m.latest)}</dd></dl></div>
-      ${figs}
+      <div class="panel-b" id="monKv">${m.daily ? monKv(m) : `<dl class="kv"><dt>Standing target</dt><dd>decision ${esc(d.id)} · ${esc(d.kind)}${d.priced_as_of ? ` · priced as of ${esc(d.priced_as_of)}` : ""}</dd><dt>Latest session</dt><dd>${esc(m.latest)}</dd></dl>`}</div>
+      ${m.daily ? `<div class="bt-figs" id="monFigs">${monFigs(m)}</div>` : ""}
       ${m.messages?.length ? `<div class="console">${logHtml(m.messages.join("\n"))}</div>` : ""}
     </section>
-    ${m.rebalances.length ? `<section class="panel"><div class="panel-h"><h2>Fills since the decision</h2><span class="label">paper portfolio of the standing target, not broker fills</span></div>
-      <div class="scroll"><table><thead><tr><th>Decision</th><th>Fill</th><th>Trigger</th><th>Policy</th><th class="n">Turnover</th></tr></thead><tbody>
-      ${m.rebalances.map(e => `<tr><td class="mono">${e.decision}</td><td class="mono">${e.fill}</td><td>${e.trigger === "inception" ? '<span class="pill dec">decision</span>' : e.trigger === "breach" ? '<span class="pill bad">breach</span>' : e.trigger === "drift" ? '<span class="pill warn">drift</span>' : '<span class="pill info">calendar</span>'}</td><td>${e.policy}</td><td class="n">${pct(e.turnover, 1)}</td></tr>`).join("")}
+    ${g ? `<section class="panel"><div class="panel-h"><h2>Forward test from inception</h2>
+        <div class="bt-key"><span><i></i>${esc(P.name)}</span><span><i class="b"></i>${esc(m.benchmark)}</span><span><i class="d dec"></i>decision fill</span><span><i class="d"></i>calendar fill</span>${m.rebalances.some(e => e.trigger === "breach") ? '<span><i class="d x"></i>breach fill</span>' : ""}${m.rebalances.some(e => e.trigger === "drift") ? '<span><i class="d w"></i>drift fill</span>' : ""}<span><i class="pend"></i>fill pending</span></div></div>
+      <div class="bt-chart" id="monCw">
+        <svg id="monMain" viewBox="0 0 1000 300" role="img" aria-label="Paper portfolio and benchmark growth of 100 since inception">${g.main}</svg>
+        <div class="label" style="padding:6px 8px 0">Excess vs benchmark · hover a session to see the book on its close</div>
+        <svg id="monEx" viewBox="0 0 1000 110" role="img" aria-label="Cumulative excess return">${g.ex}</svg>
+        <div class="bt-tip" id="monTip" hidden></div>
+      </div></section>` : ""}
+    ${m.rebalances.length ? `<section class="panel"><div class="panel-h"><h2>Fills since inception</h2><span class="label">paper portfolio of the standing target, not broker fills</span></div>
+      <div class="scroll"><table><thead><tr><th>Decision</th><th>Fill</th><th>Trigger</th><th>Book</th><th>Policy</th><th class="n">Turnover</th></tr></thead><tbody>
+      ${m.rebalances.map(e => `<tr><td class="mono">${e.decision}</td><td class="mono">${e.fill}</td><td>${e.trigger === "inception" || e.trigger === "decision" ? `<span class="pill dec"${e.also ? ' title="also the calendar rebalance of this period"' : ""}>${e.trigger}${e.also ? " + calendar" : ""}</span>` : e.trigger === "breach" ? '<span class="pill bad">breach</span>' : e.trigger === "drift" ? '<span class="pill warn">drift</span>' : '<span class="pill info">calendar</span>'}</td><td class="mono">${esc(e.profile || "")}</td><td>${e.policy}</td><td class="n">${pct(e.turnover, 1)}</td></tr>`).join("")}
       </tbody></table></div></section>` : ""}
-    ${m.holdings.length ? `<section class="panel"><div class="panel-h"><h2>Holdings now</h2><span class="label">drifted weight on ${esc(m.latest)} vs the standing target</span></div>
-      <div class="scroll"><table><thead><tr><th>Ticker</th><th>Group</th><th class="n">Weight</th><th class="n">Target</th><th class="n">Gap</th><th>Flags</th></tr></thead><tbody>
-      ${m.holdings.map(x => `<tr><td class="mono">${esc(x.t)}</td><td>${esc(x.group)}</td><td class="n">${pct(x.w)}</td><td class="n">${pct(x.target)}</td><td class="n ${tone(x.w - x.target)}">${spp(x.w - x.target)}</td><td>${(byT[x.t] || []).map(f => `<span class="pill xs warn plain" title="${esc(flagText(f))}">${esc(f.screen)}</span>`).join(" ")}</td></tr>`).join("")}
-      </tbody></table></div></section>` : ""}
+    ${m.daily ? `<section class="panel" id="monHold">${monHold(m, null, byT)}</section>` : ""}
     <section class="panel"><div class="panel-h"><h2>Screen flags <span class="num" style="color:var(--ink-3)">${Object.keys(byT).length}</span></h2><span class="label">${m.screens_on.length ? `on the latest session · ${m.screens_on.join(", ")} on` : "every screen off"}</span></div>
       ${fl.length ? `<div class="scroll"><table><thead><tr><th>Ticker</th><th>Screen</th><th class="n">Value</th><th class="n">Threshold</th><th></th></tr></thead><tbody>
-        ${fl.map(f => `<tr><td class="mono">${esc(f.t)}</td><td>${esc(FLAGNAME[f.screen])}</td><td class="n">${f.value === null ? "no data" : (+f.value).toPrecision(4)}</td><td class="n">${f.threshold}${UNIT[f.screen]}</td><td>${f.why === "no data" ? '<span class="pill xs off">no data</span>' : '<span class="pill xs warn">below</span>'}</td></tr>`).join("")}
+        ${fl.map(f => `<tr><td class="mono">${esc(f.t)}</td><td>${esc(FLAGNAME[f.screen])}</td><td class="n">${flagVal(f.screen, f.value)}</td><td class="n">${flagVal(f.screen, f.threshold)}</td><td>${f.why === "no data" ? '<span class="pill xs off">no data</span>' : '<span class="pill xs warn">below</span>'}</td></tr>`).join("")}
       </tbody></table></div>` : `<div class="panel-b"><p style="color:var(--ink-3);font-size:13px">${m.screens_on.length ? "No holding is flagged." : "Turn a screen rule on below to flag holdings."}</p></div>`}
     </section>`;
   }
@@ -1086,6 +1128,13 @@ function bindFlow(){
   }
   if (k === "monitor"){
     if ($("#monRefresh")) $("#monRefresh").onclick = () => { P.mon = null; loadMonitor(); };
+    const m = P.mon, c = MONC.cur;
+    if (m?.daily && c){
+      const byT = (m.flags || []).reduce((a, f) => ((a[f.t] ??= []).push(f), a), {});
+      chartHover("mon", c, i => { const p = m.daily[i].pending;
+        return `<b>${c.dates[i]}</b><span>Portfolio</span><span>${c.P[i].toFixed(2)}</span><span>${esc(m.benchmark)}</span><span>${c.B[i].toFixed(2)}</span><span>Excess</span><span>${spct(c.E[i])}</span><span>Group drift</span><span>${m.daily[i].drift === null ? "cash" : pct(m.daily[i].drift, 2)}</span>${p ? `<span>Fill pending</span><span>${esc(p.trigger)} at the ${p.fill} open</span>` : ""}`; },
+        i => { $("#monKv").innerHTML = monKv(m, i); $("#monFigs").innerHTML = monFigs(m, i); $("#monHold").innerHTML = monHold(m, i, byT); });
+    }
     $("#scSave").onclick = () => {
       const v = (key, field) => ({on:$(`#sc_${key}`).checked, [field]:+$(`#sc_${key}_v`).value});
       action("flow", "PUT", `/api/p/${name}/screens`,
@@ -1171,24 +1220,52 @@ function xAxis(dates, x, h){
   return t.filter((_, k) => k % every === 0).map(i => { const m = +dates[i].slice(5,7) - 1;
     return `<line class="gridl" x1="${x(i)}" x2="${x(i)}" y1="8" y2="${h}" opacity=".55"/><text class="ax" x="${x(i)}" y="${h+16}" text-anchor="middle">${m === 0 || i === 0 ? `${MON[m]} ${dates[i].slice(2,4)}` : MON[m]}</text>`; }).join("");
 }
-function btCharts(r, code){
-  const P = r.portfolio.map(v => v*100), B = r.benchmarks[code].equity.map(v => v*100);
-  const E = P.map((v, i) => v / B[i] - 1), n = P.length, x = xScale(n), dates = r.dates;
+/* growth of 100 and excess, crosshairs `${pre}Xh`/`${pre}Xh2`; bands shade the
+   sessions from a decision's close to its fill (pending, D66) */
+function growthCharts(pv, bv, dates, rebs, pre, bands=false){
+  const P = pv.map(v => v*100), B = bv.map(v => v*100);
+  const E = P.map((v, i) => v / B[i] - 1), n = P.length, x = xScale(n);
   let H = 272, top = 12, tk = niceTicks(Math.min(...P, ...B), Math.max(...P, ...B), 5);
   let lo = tk[0], hi = tk.at(-1), y = v => top + (hi - v)/(hi - lo)*(H - top);
   const pos = Object.fromEntries(dates.map((d, i) => [d, i]));
-  let main = tk.map(t => `<line class="${t === 100 ? "zero" : "gridl"}" x1="${CM.l}" x2="${1000-CM.r}" y1="${y(t)}" y2="${y(t)}"/><text class="ax" x="${CM.l-8}" y="${y(t)+4}" text-anchor="end">${t}</text>`).join("")
+  const band = bands ? rebs.filter(e => pos[e.decision] !== undefined && pos[e.fill] > pos[e.decision])
+    .map(e => `<rect class="pend" x="${x(pos[e.decision])}" width="${x(pos[e.fill]) - x(pos[e.decision])}" y="${top}" height="${H - top}"><title>${e.trigger} decided ${e.decision}, fill pending to the ${e.fill} open</title></rect>`).join("") : "";
+  let main = band + tk.map(t => `<line class="${t === 100 ? "zero" : "gridl"}" x1="${CM.l}" x2="${1000-CM.r}" y1="${y(t)}" y2="${y(t)}"/><text class="ax" x="${CM.l-8}" y="${y(t)+4}" text-anchor="end">${t}</text>`).join("")
     + xAxis(dates, x, H) + `<path class="lb" d="${linePath(B, x, y)}"/><path class="lp" d="${linePath(P, x, y)}"/>`
-    + r.rebalances.map(e => { const i = pos[e.fill]; return `<circle class="mk-${e.trigger}" cx="${x(i)}" cy="${y(P[i])}" r="4.5"><title>${e.trigger} fill ${e.fill}</title></circle>`; }).join("")
-    + `<circle cx="${x(n-1)}" cy="${y(P[n-1])}" r="3.5" fill="var(--accent)"/><line class="cross" id="xh" x1="0" x2="0" y1="${top}" y2="${H}" visibility="hidden"/>`;
+    + rebs.map(e => { const i = pos[e.fill]; return `<circle class="mk-${e.trigger}" cx="${x(i)}" cy="${y(P[i])}" r="4.5"><title>${e.trigger} fill ${e.fill}</title></circle>`; }).join("")
+    + `<circle cx="${x(n-1)}" cy="${y(P[n-1])}" r="3.5" fill="var(--accent)"/><line class="cross" id="${pre}Xh" x1="0" x2="0" y1="${top}" y2="${H}" visibility="hidden"/>`;
   H = 86; top = 6; tk = niceTicks(Math.min(0, ...E), Math.max(0, ...E), 2); lo = tk[0]; hi = tk.at(-1);
   y = v => top + (hi - v)/(hi - lo)*(H - top);
   const y0 = y(0), area = vals => `M${x(0)} ${y0}` + vals.map((v, i) => `L${x(i).toFixed(1)} ${y(v).toFixed(1)}`).join("") + `L${x(n-1)} ${y0}Z`;
   const ex = tk.map(t => `<line class="${t === 0 ? "zero" : "gridl"}" x1="${CM.l}" x2="${1000-CM.r}" y1="${y(t)}" y2="${y(t)}"/><text class="ax" x="${CM.l-8}" y="${y(t)+4}" text-anchor="end">${t > 0 ? "+" : ""}${+(t*100).toFixed(1)}%</text>`).join("")
     + xAxis(dates, x, H) + `<path class="ex-up" d="${area(E.map(v => Math.max(v, 0)))}"/><path class="ex-dn" d="${area(E.map(v => Math.min(v, 0)))}"/><path class="lx" d="${linePath(E, x, y)}"/>`
-    + `<line class="cross" id="xh2" x1="0" x2="0" y1="${top}" y2="${H}" visibility="hidden"/>`;
-  BT.cur = {P, B, E, dates, x, code};
-  return {main, ex};
+    + `<line class="cross" id="${pre}Xh2" x1="0" x2="0" y1="${top}" y2="${H}" visibility="hidden"/>`;
+  return {main, ex, cur:{P, B, E, dates, x}};
+}
+function btCharts(r, code){
+  const g = growthCharts(r.portfolio, r.benchmarks[code].equity, r.dates, r.rebalances, "bt");
+  BT.cur = {...g.cur, code};
+  return g;
+}
+/* crosshair and tooltip on `#${pre}Main`/`#${pre}Ex` inside `#${pre}Cw`;
+   onDay(i) on each move, onDay(null) on leave */
+function chartHover(pre, cur, tipHtml, onDay){
+  const svg = $(`#${pre}Main`);
+  if (!svg || !cur) return;
+  const xs = [`#${pre}Xh`, `#${pre}Xh2`], tip = $(`#${pre}Tip`);
+  const move = ev => {
+    const rect = svg.getBoundingClientRect(), wrap = $(`#${pre}Cw`).getBoundingClientRect();
+    const vx = (ev.clientX - rect.left) / rect.width * 1000, n = cur.P.length;
+    const i = Math.max(0, Math.min(n - 1, Math.round((vx - CM.l) / (1000 - CM.l - CM.r) * (n - 1))));
+    xs.forEach(s => { const l = $(s); l.setAttribute("x1", cur.x(i)); l.setAttribute("x2", cur.x(i)); l.setAttribute("visibility", "visible"); });
+    tip.innerHTML = tipHtml(i);
+    tip.hidden = false;
+    tip.style.left = Math.min(rect.left - wrap.left + cur.x(i) / 1000 * rect.width + 12, wrap.width - tip.offsetWidth - 8) + "px";
+    tip.style.top = "14px";
+    if (onDay) onDay(i);
+  };
+  const leave = () => { tip.hidden = true; xs.forEach(s => $(s).setAttribute("visibility", "hidden")); if (onDay) onDay(null); };
+  [svg, $(`#${pre}Ex`)].forEach(el => { el.onmousemove = move; el.onmouseleave = leave; });
 }
 
 function renderBacktest(P){
@@ -1251,7 +1328,7 @@ function renderBacktest(P){
     <section class="panel"><div class="panel-h"><h2>Rebalance log</h2><span class="label">decision at the close · ${c.lag_sessions ? `fill at the open ${c.lag_sessions} session${c.lag_sessions === 1 ? "" : "s"} later` : "fill at the same close"}</span></div>
       <div class="scroll"><table><thead><tr><th>Decision</th><th>Fill</th><th>Trigger</th>${r.timeline ? "<th>Profile</th>" : ""}<th>Policy</th><th>Target as of</th><th class="n">Group drift</th><th class="n">Turnover</th><th class="n">Cost</th><th class="n">Holdings</th><th>Note</th></tr></thead><tbody>
       ${r.rebalances.map(e => `<tr><td class="mono">${e.decision}</td><td class="mono">${e.fill}</td>
-        <td>${e.trigger === "drift" ? '<span class="pill warn">drift</span>' : e.trigger === "breach" ? `<span class="pill bad" title="a cap broken by more than ${pct(breachTol, 0)} of its limit; the fill clips it to the cap">breach</span>` : e.trigger === "calendar" ? '<span class="pill info">calendar</span>' : e.trigger === "decision" ? `<span class="pill dec" title="a recorded decision became the target${e.also ? "; also the calendar date" : ""}${e.deferred_from ? `; effective ${e.deferred_from}, deferred while a fill was pending` : ""}">decision${e.also ? " + calendar" : ""}</span>` : '<span class="pill off">inception</span>'}</td>
+        <td>${e.trigger === "drift" ? '<span class="pill warn">drift</span>' : e.trigger === "breach" ? `<span class="pill bad" title="a cap broken by more than ${pct(breachTol, 0)} of its limit; the fill clips it to the cap">breach</span>` : e.trigger === "calendar" ? '<span class="pill info">calendar</span>' : e.trigger === "decision" ? `<span class="pill dec" title="a recorded decision became the target${e.also ? "; also the calendar date" : ""}${e.deferred_from ? `; effective ${e.deferred_from}, deferred while a fill was pending` : ""}">decision${e.also ? " + calendar" : ""}</span>` : `<span class="pill off"${e.also ? ' title="also the calendar rebalance of this period"' : ""}>inception${e.also ? " + calendar" : ""}</span>`}</td>
         ${r.timeline ? `<td class="mono">${esc(e.profile)}</td>` : ""}
         <td>${e.policy === "edge" ? '<span class="pill xs warn" title="broken cap clipped to its limit, the rest untouched">edge</span>' : '<span class="pill xs off" title="the whole book to the standing target">full</span>'}</td>
         <td class="mono">${e.target_as_of}</td>
@@ -1343,22 +1420,8 @@ function bindBacktest(){
   if ($("#btReset")) $("#btReset").onclick = () => { BT.draft = {...BT.saved}; render(); };
   if ($("#btSave")) $("#btSave").onclick = () => action("bt", "PUT", `/api/p/${encodeURIComponent(BT.name)}/backtest_config`,
     {config:BT.draft, version:BT.version}, async res => { if (res.ok){ BT.saved = {...BT.draft}; BT.version = res.version; BT.cfgErr = null; } });
-  const svg = $("#btMain");
-  if (svg && BT.cur){
-    const move = ev => {
-      const c = BT.cur, rect = svg.getBoundingClientRect(), wrap = $("#btCw").getBoundingClientRect();
-      const vx = (ev.clientX - rect.left) / rect.width * 1000, n = c.P.length;
-      const i = Math.max(0, Math.min(n - 1, Math.round((vx - CM.l) / (1000 - CM.l - CM.r) * (n - 1))));
-      ["#xh", "#xh2"].forEach(s => { const l = $(s); l.setAttribute("x1", c.x(i)); l.setAttribute("x2", c.x(i)); l.setAttribute("visibility", "visible"); });
-      const tip = $("#btTip");
-      tip.innerHTML = `<b>${c.dates[i]}</b><span>Portfolio</span><span>${c.P[i].toFixed(2)}</span><span>${esc(c.code)}</span><span>${c.B[i].toFixed(2)}</span><span>Excess</span><span>${spct(c.E[i])}</span>`;
-      tip.hidden = false;
-      tip.style.left = Math.min(rect.left - wrap.left + c.x(i) / 1000 * rect.width + 12, wrap.width - tip.offsetWidth - 8) + "px";
-      tip.style.top = "14px";
-    };
-    const leave = () => { $("#btTip").hidden = true; ["#xh", "#xh2"].forEach(s => $(s).setAttribute("visibility", "hidden")); };
-    [svg, $("#btEx")].forEach(el => { el.onmousemove = move; el.onmouseleave = leave; });
-  }
+  const c = BT.cur;
+  chartHover("bt", c, i => `<b>${c.dates[i]}</b><span>Portfolio</span><span>${c.P[i].toFixed(2)}</span><span>${esc(c.code)}</span><span>${c.B[i].toFixed(2)}</span><span>Excess</span><span>${spct(c.E[i])}</span>`);
 }
 
 /* ---------- render ---------- */

@@ -1,4 +1,5 @@
 Ticker,Company_name,ICB L2 sector,Exclusive group
+ABB,An Binh Bank,Banks,Banks - Private
 VCB,Vietcombank,Banks,Banks - State
 CTG,VietinBank,Banks,Banks - State
 MBB,MBBank,Banks,Banks - State
@@ -106,3 +107,4 @@ TAL,Taseco Land,Real Estate,Real Estate - Residential
 TCX,Techcom Securities,Financial Services,Financial Services
 VCK,VP Securities,Financial Services,Financial Services
 VPX,VPB Securities,Financial Services,Financial Services
+PVS ,PetroVietnam Service,Oil & Gas,Oil & Gas
