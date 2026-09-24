@@ -42,7 +42,7 @@ index/group_map_live.csv         hand     sector grouping, read on every calcula
 index/fol.csv                    hand     FOL limits (header only; the fol screen flags "no data")
 portfolio/<name>/statement.json  desk     approach, scope, holdings, rebalance rule
 portfolio/<name>/constraints.json  desk   active budget pp; sector / stock / large caps
-portfolio/<name>/screens.json    desk     screen rules, flags only
+portfolio/<name>/screens.json    desk     screen rules (name + position, D70), flags only
 portfolio/<name>/book.json       desk     the working allocation (spec)
 portfolio/<name>/decisions/      desk     recorded decisions, one per date; archive/ after reset
 portfolio/<name>/backtest_config.json  desk  backtest costs, lag, risk-free rate
@@ -274,6 +274,22 @@ Spec: `docs/plan_v2.md`. Built 2026-09-21; see Progress.md.
       in the flow, Monitor with screen thresholds, Decisions pills and Reset.
 - [x] **D.** Retire baseline.py, fork/carry, newer_than, anchor_date.json,
       the migration script.
+
+## Step 18 — v3: one timing rule, derived period decisions, replication (D67-D70)
+
+Spec: `docs/plan_v3.md`. Order A, C, B.
+
+- [x] **A.** Calendar on each period's last close, filled at the next open;
+      unattainable decisions (priced on the last session or after it);
+      Monitor holds the last attainable decision; lag pinned to 1. New gate,
+      `energy_focus` mechanical from the history start: +10.8864%, 8/2/0
+      (was +10.4954% before D67; the old 5.99% was measured on less data).
+- [x] **C.** Replication: `scr/replicate.py`, position screens in
+      `screens.json`, the third desk section.
+- [x] **B.** Derived calendar rows in the Decisions log (`timeline()`).
+- [x] Desk walk-through on a scratch copy.
+- [ ] User review of Replication, the Decisions log and the new timing in the
+      browser.
 
 ## Later (not scheduled)
 

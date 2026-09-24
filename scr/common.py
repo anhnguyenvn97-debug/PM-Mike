@@ -69,6 +69,24 @@ screen off.
     A flag is {"t", "screen", "value", "threshold", "why": "below" | "no data"}.
     Thresholds are not part of the setup hash: they change no weight.
 
+    Position screens (D70), on the same file, edited on the Replication
+    section: they depend on the AUM, so only a replication ticket computes them
+    (portfolio.position_flags, why "above" | "no data"). A missing block takes
+    its default, on:
+
+    {"ownership": {"on": true, "max_pct_of_shares": 5},
+     "float":     {"on": true, "max_pct_of_float": 15},
+     "liquidity": {"on": true, "participation_pct": 50, "max_days": 20}}
+
+    ownership  shares held / outstanding_shares, percent (5% is the major
+               shareholder disclosure threshold)
+    float      shares held / free_float, percent
+    liquidity  sessions to trade the position at participation_pct of the
+               21-session average daily value (params.adv_21, VND);
+               participation_pct in (0, 100]
+
+LOT = 100 shares, the board lot every replication ticket rounds to (D69).
+
 backtest_config.json -- one per portfolio, written by the desk's Backtest tab
 (or by hand). Trading assumptions for scr/backtest_engine.py only; the
 rebalance mandate stays in statement.json. A missing file means the defaults.
@@ -77,8 +95,10 @@ rebalance mandate stays in statement.json. A missing file means the defaults.
      "risk_free_rate": 0.06}
 
     brokerage_bps   per side, >= 0          sell_tax_bps  on sells, >= 0
-    lag_sessions    integer 0-5: fill at the OPEN this many sessions after the
-                    decision; 0 = same close
+    lag_sessions    integer 0-5, pinned to 1 (D67: every rebalance fills at the
+                    next session's OPEN). Another value is a backtest-only
+                    what-if (0 = same close) that the engine WARNs about; the
+                    desk does not offer it, Monitor and Replication ignore it
     risk_free_rate  FRACTION a year in [0, 1), used for Sharpe only
 
 book.json -- one per portfolio, the working allocation (D58), written by the
@@ -148,6 +168,9 @@ KINDS = ("inception", "period", "active")
 FREQUENCIES = ("2W", "1M", "1Q")
 BREACH_TOL = 0.10                  # statement.json rebalance.breach_tolerance default
 SCREENS = {"turnover": "min_pct", "float_cap": "min_bn_vnd", "fol": "min_limit_pct"}
+POSITION_SCREENS = {"ownership": ("max_pct_of_shares",), "float": ("max_pct_of_float",),
+                    "liquidity": ("participation_pct", "max_days")}     # D70, AUM-dependent
+LOT = 100                          # board lot, shares (D69)
 CAPS = ("sector", "stock", "large")    # the constraints.json blocks with an on switch
 
 
@@ -296,32 +319,43 @@ def load_statement(home: Path) -> dict | None:
 def default_screens() -> dict:
     return {"turnover": {"on": False, "min_pct": 0.10},
             "float_cap": {"on": False, "min_bn_vnd": 1000},
-            "fol": {"on": False, "min_limit_pct": 30}}
+            "fol": {"on": False, "min_limit_pct": 30},
+            "ownership": {"on": True, "max_pct_of_shares": 5},
+            "float": {"on": True, "max_pct_of_float": 15},
+            "liquidity": {"on": True, "participation_pct": 50, "max_days": 20}}
 
 
 def validate_screens(sc: dict) -> dict:
-    """Return screens with every screen present; raise BookError on a fault."""
+    """Return screens with every screen present (a missing one takes its
+    default); raise BookError on a fault."""
     where = SCREENS_FILE
     if not isinstance(sc, dict):
         raise BookError(f"{where}: expected a JSON object")
-    unknown = sorted(set(sc) - set(SCREENS))
+    keys = {**{n: (k,) for n, k in SCREENS.items()}, **POSITION_SCREENS}
+    unknown = sorted(set(sc) - set(keys))
     if unknown:
-        raise BookError(f"{where}: unknown screen(s) {unknown}; available {sorted(SCREENS)}")
+        raise BookError(f"{where}: unknown screen(s) {unknown}; available {sorted(keys)}")
     base, out = default_screens(), {}
-    for name, key in SCREENS.items():
-        cfg = sc.get(name, {"on": False})
+    for name, fields in keys.items():
+        cfg = sc.get(name, base[name])
         if not isinstance(cfg, dict):
             raise BookError(f"{where}: {name} must be an object")
-        extra = sorted(set(cfg) - {"on", key})
+        extra = sorted(set(cfg) - {"on", *fields})
         if extra:
             raise BookError(f"{where}: {name} has unknown key(s) {extra}")
         if not isinstance(cfg.get("on", False), bool):
             raise BookError(f"{where}: {name}.on must be true or false")
-        v = cfg.get(key, base[name][key])
-        if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) \
-                or v < 0:
-            raise BookError(f"{where}: {name}.{key} must be a non-negative number, got {v!r}")
-        out[name] = {"on": bool(cfg.get("on", False)), key: v}
+        out[name] = {"on": bool(cfg.get("on", False))}
+        for key in fields:
+            v = cfg.get(key, base[name][key])
+            if isinstance(v, bool) or not isinstance(v, (int, float)) \
+                    or not math.isfinite(v) or v < 0:
+                raise BookError(f"{where}: {name}.{key} must be a non-negative number, "
+                                f"got {v!r}")
+            out[name][key] = v
+    p = out["liquidity"]["participation_pct"]
+    if not 0 < p <= 100:
+        raise BookError(f"{where}: liquidity.participation_pct {p!r} must be in (0, 100]")
     return out
 
 

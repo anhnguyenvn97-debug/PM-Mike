@@ -27,8 +27,11 @@ decided on the last session on or before its effective date -- the session
 Record priced it on (priced_as_of) whenever the data covered that date when it
 was recorded -- so a weekend or holiday date trades at the next open, the first
 it could. Every profile at or before the start collapses to the start, the
-latest winning; two on one session, the last wins; an effective date after the
-last session is reported and not applied. If none lands on the start, the
+latest winning; two on one session, the last wins. A decision is attainable
+only when the data holds both its session's close and the next session's open
+(D67): one priced on the last session, or effective after it, is
+"unattainable", reported and not applied, and the one before it stays in
+force; the next drop makes it attainable by itself. If none lands on the start, the
 first opens the window as an illustration AND stays on its own session, where
 it fires as a decision fill: from there on the replay trades the book as
 recorded. A message says so.
@@ -55,14 +58,19 @@ Triggers, checked at each close while no fill is pending, first match wins:
 
     decision   a profile whose session has come and is not yet applied. One
                that lands while a fill is pending applies at the first close
-               with none pending (deferred_from); one on a calendar boundary is
-               a single decision fill (also = calendar), and so is one filling
-               at the open of a calendar boundary or still in flight on it
-               (D64): that period's calendar rebalance is not traded again.
-               The calendar clock is never moved by a decision (D55).
-    calendar   statement.json frequency 2W | 1M | 1Q | null: the first session
-               of each period. 1M / 1Q are calendar periods; 2W counts 14-day
-               periods from the Monday of the start session's week. null:
+               with none pending (deferred_from). One whose session is a
+               period's last session IS that period's calendar rebalance: a
+               single decision fill (also = calendar), not traded again (D67).
+               At a lag of 2 or more, one still in flight on a period's last
+               session is marked the same. The calendar clock is never moved
+               by a decision (D55).
+    calendar   statement.json frequency 2W | 1M | 1Q | null: the LAST session
+               of each period, filled at the first open of the next (D67). 1M /
+               1Q are calendar periods; 2W counts 14-day periods from the
+               Monday of the start session's week. The last session in the
+               data never fires: its period is not known to be over until the
+               next session is in the data. An inception on a period's last
+               session is that period's rebalance (also = calendar). null:
                inception only.
     breach     a cap in constraints.json broken by more than statement.json
                rebalance.breach_tolerance (a missing key means 10%) of its limit
@@ -95,11 +103,13 @@ target, the rest renormalised. It is listed in the fill's dropped column with
 the groups the derivation dropped (a name whose whole group dropped is listed
 by its group).
 
-The start session always decides inception. A decision observes session t's
-close (t placed as above: an effective Saturday decides on Friday's close,
-the book it recorded) and fills at the OPEN of t + lag_sessions (D52, D64);
-lag 0 fills at the
-close of t itself. No new decision while a fill is pending: at lag 1 the fill
+The start session always decides inception. One timing rule for every
+rebalance (D67): it references a session's close and fills at the next
+session's OPEN -- a decision its placed session t (an effective Saturday
+decides on Friday's close, the book it recorded), a calendar rebalance its
+period's last session. backtest_config.json lag_sessions (D52) is pinned to 1;
+any other value is a backtest-only what-if and WARNs: t + lag_sessions fills
+at that session's open, lag 0 at the close of t itself. No new decision while a fill is pending: at lag 1 the fill
 is done before the next close, so every close is checked; at lag 2 or more the
 sessions between the decision and the fill session are not (the trade is in
 flight). The portfolio is cash until the first fill.
@@ -128,8 +138,9 @@ Statistics (252 sessions a year, population std):
 
 Start: an ISO date, placed like a decision on the last session on or before
 it (D64), so a start on an inception date opens on the session the inception
-was priced on; a date before the history starts at the first session. The window must leave at
-least lag + 2 sessions.
+was priced on; a date before the history starts at the first session. The
+window must leave the start and its fill: at least lag + 1 sessions (2 at lag
+0 or 1).
 
 run(name, start, benchmark, config=, timeline=) computes without writing (the
 desk uses it; config stands in for backtest_config.json). Its "benchmarks"
@@ -137,8 +148,8 @@ holds the rebased curve and statistics for EVERY code with a close on each
 session of the window, so a page can switch benchmark without re-running; the
 requested benchmark must be one of them. Its "timeline" (None without one)
 lists each profile: id, effective, kind, note, setup_hash, placed and applied
-sessions (its own session when it also opened the window), status, evaluate
-report. Its "now" holds the end state: group drift
+sessions (its own session when it also opened the window), status (applied |
+superseded by <id> | unattainable | not reached), evaluate report. Its "now" holds the end state: group drift
 of the held weights against the standing target and the first cap they break
 by more than the tolerance (None when none). Its "daily" is None unless
 run(daily=True): one entry per session of the window (monitor, below).
@@ -151,13 +162,30 @@ reports the forward test from the inception's session to the last session
 inception, and per session ("daily", run(daily=True)) the state at its close:
 the decision in force, the session that derived the standing target, a fill
 decided and not yet traded (pending), group drift against the standing
-target, breach, and the held weights against the target. Its status names the
-last decision (placed as above, D64: priced Friday, filled Monday's open); it
-also holds "now", the next calendar date and the screen flags on the standing
-target's names. A decision after the history, or one too recent to
-leave lag + 2 sessions, returns only its status and the flags. It writes
-nothing and never trades anything real: the paper portfolio of the standing
-target, not broker fills or cash.
+target, breach, and the held weights against the target. It always fills at the
+next open (lag 1, D67), whatever backtest_config.json says. Its status names
+the last ATTAINABLE decision (placed as above, D64: priced Friday, filled
+Monday's open); "decisions" lists every recorded one with "unattainable" (None
+or why, D67). It also holds "now", the next calendar rebalance as
+"next_reference" (the close it will reference) and "next_calendar" (the open
+it trades), and the screen flags on the standing target's names. When no
+decision is attainable it returns only its status, the decisions and the
+flags. It writes nothing and never trades anything real: the paper portfolio
+of the standing target, not broker fills or cash.
+
+timeline(name) is the Decisions log (D68): the recorded decisions plus every
+calendar rebalance the forward test derived from them, in session order,
+derived on read and written nowhere. Each entry: id, effective, kind,
+source ("recorded" | "derived"), also ("calendar" when a recorded decision
+took a period boundary's place), unattainable (None or why), status, session
+(the close it references; None when unattainable), priced_as_of. A derived
+entry is kind "period" with id = effective = its reference session, the
+decision it derives from (profile, its setup_hash), fill, turnover and the
+standing target's holdings [{t, group, w}]. It is recomputed from today's
+group map and today's decisions: recording a decision on its session replaces
+it (that decision is also = calendar); a decision earlier in the period
+re-derives every calendar entry after it. Derived entries are never fed back
+into run(timeline=).
 
 build() replays decisions/ when present (--mechanical: book.json) and adds the
 files, overwritten in portfolio/<name>/backtest_engine/:
@@ -195,6 +223,7 @@ from common import (
     BT_CONFIG,
     DB,
     PORTFOLIO,
+    SCREENS,
     STATEMENT,
     BookError,
     load_backtest_config,
@@ -469,13 +498,9 @@ def simulate(R: np.ndarray, sessions, start: int, freq, threshold, cfg: dict,
             fill(i)                                    # at the open (lag >= 1)
         if i > start:
             leg(R_post[i])                             # open -> close, new weights
-        cal = keys is not None and i > start and keys[i] != keys[i - 1]
+        cal = keys is not None and i + 1 < N and keys[i + 1] != keys[i]   # a period ends (D67)
         if cal and pending is not None and pending["trigger"] in ("inception", "decision"):
-            pending["also"] = "calendar"               # in flight on the boundary (D64)
-        elif (cal and pending is None and events and events[-1]["fill"] == sessions[i].date()
-              and events[-1]["trigger"] in ("inception", "decision")):
-            events[-1]["also"] = "calendar"            # filled at this boundary's open (D64)
-            cal = False
+            pending["also"] = "calendar"               # in flight on the boundary (lag >= 2)
         if pending is None and i + lag < N:
             trigger = also = deferred = None
             due = k + 1 < len(regimes) and regimes[k + 1]["at"] <= i
@@ -573,28 +598,40 @@ def statistics(nav: np.ndarray, bench: np.ndarray, events: list, rf: float) -> d
 
 # --------------------------------------------------------------- run / build
 
+def unattainable(S: pd.DatetimeIndex, effective) -> str | None:
+    """Why a decision effective on this date cannot fill in the data, or None
+    (D67): its session must leave the next session's open to fill at."""
+    eff = pd.Timestamp(effective)
+    if eff > S[-1]:
+        return f"effective after the last session {S[-1].date()}"
+    if int(S.searchsorted(eff, side="right")) == len(S):
+        return f"priced on the last session {S[-1].date()}; its fill needs the next open"
+    return None
+
+
 def place(timeline: list, S: pd.DatetimeIndex, i0: int) -> tuple[list, list, dict]:
     """Decisions onto sessions -> ([(index, profile)], messages, status by id).
     Each lands on the last session on or before its effective date (D64);
     everything at or before the start collapses to the start, the latest
-    winning; the same session: the last wins; after the history: reported, not
-    applied. If none lands on the start, the first one opens the window and
-    also stays on its own session."""
+    winning; the same session: the last wins; one priced on the last session
+    or effective after it is unattainable (D67): reported, not applied. If none
+    lands on the start, the first one opens the window and also stays on its
+    own session."""
     msgs, status, at = [], {}, {}
     for d in sorted(timeline, key=lambda d: (str(d["effective"]), d["id"])):
-        eff = pd.Timestamp(d["effective"])
-        if eff > S[-1]:
-            status[d["id"]] = "after the history"
-            msgs.append(f"INFO  decision {d['id']} effective {d['effective']} is after the "
-                        f"last session {S[-1].date()}; not applied")
+        why = unattainable(S, d["effective"])
+        if why:
+            status[d["id"]] = "unattainable"
+            msgs.append(f"INFO  decision {d['id']} effective {d['effective']} is unattainable: "
+                        f"{why}; not applied")
             continue
-        j = max(int(S.searchsorted(eff, side="right")) - 1, i0)
+        j = max(int(S.searchsorted(pd.Timestamp(d["effective"]), side="right")) - 1, i0)
         if j in at:
             status[at[j]["id"]] = f"superseded by {d['id']}"
         at[j] = d
     if not at:
-        raise BookError("no decision lands in the window\n      run without replaying "
-                        "decisions (mechanical)")
+        raise BookError("no attainable decision lands in the window\n      run without "
+                        "replaying decisions (mechanical)")
     first = min(at)
     if first > i0:
         d = at[first]
@@ -633,10 +670,14 @@ def run(name: str, start: str | None = None, benchmark: str = "VNINDEX",
             messages.append(f"INFO  start {want.date()} is before the history; "
                             f"starts at {S[0].date()}")
     lag = cfg["lag_sessions"]
-    if len(S) - i0 < lag + 2:
-        last = S[max(0, len(S) - lag - 2)].date()
+    if lag != 1:
+        messages.append(f"WARN  lag_sessions {lag}: every rebalance fills at the next "
+                        "session's open (D67); a lag other than 1 is a backtest-only "
+                        "what-if the Monitor and Replication never use")
+    if len(S) - i0 < max(lag, 1) + 1:
+        last = S[max(0, len(S) - max(lag, 1) - 1)].date()
         raise BookError(f"start {start} leaves {max(0, len(S) - i0)} session(s); a fill "
-                        f"lag of {lag} needs {lag + 2}\n      start on or before {last}")
+                        f"lag of {lag} needs {max(lag, 1) + 1}\n      start on or before {last}")
     window = S[i0:]
     bench = mk["bench"][benchmark].loc[window]
     if bench.isna().any():
@@ -777,10 +818,12 @@ def day(S, names: list, regimes: list, t: dict) -> dict:
                                key=lambda h: (-h["w"], -h["target"]))}
 
 
-def next_calendar(freq: str | None, start: date, last: date) -> date | None:
-    """First weekday of the calendar period after `last` (period_keys' periods;
-    2W counts from the Monday of `start`'s week). Holidays are not known, so
-    the fill lands on the first session on or after it. None without a frequency."""
+def next_calendar(freq: str | None, start: date, last: date) -> tuple[date, date] | None:
+    """The next calendar rebalance after `last` as (reference, trade) (D67):
+    the last weekday of `last`'s period and the first weekday of the next one
+    (period_keys' periods; 2W counts from the Monday of `start`'s week).
+    Holidays are not known, so each lands on the nearest session. None without
+    a frequency."""
     if freq is None:
         return None
     if freq == "1M":
@@ -791,9 +834,74 @@ def next_calendar(freq: str | None, start: date, last: date) -> date | None:
     else:
         monday = start - timedelta(days=start.weekday())
         d = monday + timedelta(days=14 * ((last - monday).days // 14 + 1))
-    while d.weekday() >= 5:
-        d += timedelta(days=1)
-    return d
+    ref, trade = d - timedelta(days=1), d
+    while ref.weekday() >= 5:
+        ref -= timedelta(days=1)
+    while trade.weekday() >= 5:
+        trade += timedelta(days=1)
+    return ref, trade
+
+
+def forward(name: str, profiles: list, portfolio: Path = PORTFOLIO, db: Path = DB,
+            market: dict | None = None) -> dict:
+    """The forward test (D66, D67): run() from the inception's session with every
+    recorded decision replayed, at the next open whatever backtest_config.json's
+    lag, with the per-session trace. The one source of "the target in force on
+    a session" for the Monitor, the Decisions timeline and Replication. The
+    benchmark is VNINDEX, else the first code with a close on every session."""
+    mk = market or load_market(db)
+    S = mk["sessions"]
+    i0 = max(int(S.searchsorted(pd.Timestamp(profiles[0]["effective"]), side="right")) - 1, 0)
+    bench = next((c for c in ("VNINDEX", *sorted(mk["bench"].columns))
+                  if c in mk["bench"].columns and not mk["bench"][c].loc[S[i0:]].isna().any()),
+                 None)
+    if bench is None:
+        raise BookError(f"no benchmark has a close on every session since {S[i0].date()}")
+    return run(name, str(S[i0].date()), bench,
+               config={**load_backtest_config(portfolio / name), "lag_sessions": 1},
+               portfolio=portfolio, db=db, market=mk, timeline=profiles, daily=True)
+
+
+def timeline(name: str, portfolio: Path = PORTFOLIO, db: Path = DB,
+             market: dict | None = None) -> list[dict]:
+    """The Decisions log (D68): every recorded decision plus every calendar
+    rebalance the forward test derived from them, in session order, written
+    nowhere. See module docstring."""
+    profiles = load_decisions(portfolio / name)
+    if not profiles:
+        return []
+    mk = market or load_market(db)
+    S = mk["sessions"]
+    why = {p["id"]: unattainable(S, p["effective"]) for p in profiles}
+    also, derived, status = {}, [], {}
+    if any(not w for w in why.values()):
+        res = forward(name, profiles, portfolio, db, mk)
+        status = {t["id"]: t["status"] for t in res["timeline"]}
+        day = dict(zip((str(d) for d in res["equity"]["date"]), res["daily"]))
+        by_id = {p["id"]: p for p in profiles}
+        for e in res["rebalances"].itertuples():
+            if e.trigger in ("inception", "decision"):
+                also[e.profile] = e.also or None
+            elif e.trigger == "calendar":
+                ref = str(e.decision)
+                derived.append({
+                    "id": ref, "effective": ref, "kind": "period", "source": "derived",
+                    "also": None, "unattainable": None, "priced_as_of": ref, "status": "applied",
+                    "session": ref, "fill": str(e.fill), "profile": e.profile,
+                    "setup_hash": by_id[e.profile].get("setup_hash"),
+                    "turnover": float(e.turnover),
+                    "holdings": [{"t": h["t"], "group": h["group"], "w": h["target"]}
+                                 for h in day[ref]["holdings"] if h["target"] > EPS]})
+    recorded = []
+    for p in profiles:
+        j = max(int(S.searchsorted(pd.Timestamp(p["effective"]), side="right")) - 1, 0)
+        recorded.append({"id": p["id"], "effective": str(p["effective"]), "kind": p.get("kind"),
+                         "source": "recorded", "also": also.get(p["id"]),
+                         "unattainable": why[p["id"]], "priced_as_of": p.get("priced_as_of"),
+                         "status": status.get(p["id"], "unattainable"),
+                         "session": None if why[p["id"]] else str(S[j].date())})
+    return sorted(recorded + derived,
+                  key=lambda d: (d["session"] or "9999", d["effective"], d["source"] != "recorded"))
 
 
 def monitor(name: str, portfolio: Path = PORTFOLIO, db: Path = DB,
@@ -804,65 +912,52 @@ def monitor(name: str, portfolio: Path = PORTFOLIO, db: Path = DB,
     profiles = load_decisions(home)
     screens = load_screens(home)
     out = {"decision": None, "latest": None, "status": "", "now": None, "rebalances": [],
-           "holdings": [], "next_calendar": None, "messages": [], "flags": [],
-           "screens_on": [k for k, v in screens.items() if v["on"]]}
+           "holdings": [], "next_calendar": None, "next_reference": None, "messages": [],
+           "flags": [], "decisions": [], "screens_on": [k for k in SCREENS if screens[k]["on"]]}
     if not profiles:
         out["status"] = ("no decision recorded yet; record the inception decision on the "
                          "Target step first")
         return out
-    last = profiles[-1]
     mk = market or load_market(db)
     S = mk["sessions"]
     latest = S[-1].date()
     frame = params_mod.at(db, latest)
-    out.update(decision={k: last.get(k) for k in ("id", "effective", "kind", "priced_as_of",
-                                                  "note")},
-               latest=str(latest))
+    why = {p["id"]: unattainable(S, p["effective"]) for p in profiles}
+    keys = ("id", "effective", "kind", "priced_as_of", "note")
+    live = [p for p in profiles if not why[p["id"]]]
+    last = live[-1] if live else profiles[-1]
+    out.update(decision={k: last.get(k) for k in keys}, latest=str(latest),
+               decisions=[{**{k: p.get(k) for k in keys}, "unattainable": why[p["id"]]}
+                          for p in profiles])
 
     def flag_names(names):
         out["flags"] = pf.screen_flags(frame, names, screens)
 
-    recorded = [h["t"] for h in last.get("holdings") or []] or \
-        [t for s in last["groups"].values() for t in s.get("investable", [])]
-    eff = pd.Timestamp(last["effective"])
-    j = max(int(S.searchsorted(eff, side="right")) - 1, 0)      # its session (D64)
-    lag = load_backtest_config(home)["lag_sessions"]
-    if eff > S[-1]:
-        out["status"] = (f"decision {last['id']} is effective after the last session "
-                         f"{latest}; not in force yet")
-        flag_names(recorded)
+    if not live:
+        out["status"] = (f"decision {last['id']} is unattainable: {why[last['id']]}; "
+                         "nothing is in force yet")
+        flag_names([h["t"] for h in last.get("holdings") or []] or
+                   [t for s in last["groups"].values() for t in s.get("investable", [])])
         return out
-    if len(S) - j < lag + 2:
-        out["status"] = (f"decision {last['id']} is too recent to monitor: "
-                         f"{len(S) - j} session(s) from {S[j].date()} to {latest}, a lag of "
-                         f"{lag} needs {lag + 2}")
-        flag_names(recorded)
-        return out
-    # replay every decision from inception, so the last one trades from the
-    # book actually held, then report from its session on
-    i0 = max(int(S.searchsorted(pd.Timestamp(profiles[0]["effective"]), side="right")) - 1, 0)
-    bench = next((c for c in ("VNINDEX", *sorted(mk["bench"].columns))
-                  if c in mk["bench"].columns and not mk["bench"][c].loc[S[i0:]].isna().any()),
-                 None)
-    if bench is None:
-        raise BookError(f"no benchmark has a close on every session since {S[i0].date()}")
-    res = run(name, str(S[i0].date()), bench, portfolio=portfolio, db=db, market=mk,
-              timeline=profiles, daily=True)
+    j = max(int(S.searchsorted(pd.Timestamp(last["effective"]), side="right")) - 1, 0)
+    # every decision replayed from inception, so the last one trades from the
+    # book actually held; report from its session on
+    res = forward(name, profiles, portfolio, db, mk)
+    bench = res["benchmark"]
     end = res["holdings_end"]
     freq = res["rebalance"]["frequency"]
     reb = res["rebalances"]
     since = reb[reb["decision"] >= S[j].date()]
     eq = res["equity"]
+    nxt = next_calendar(freq, res["start"], latest)
     out.update(
         status=(f"decision {last['id']} priced {S[j].date()}, filled "
                 f"{since['fill'].iloc[0] if len(since) else 'not yet'}, held to {res['end']}"),
         now=res["now"], messages=res["messages"],
-        next_calendar=None if (d := next_calendar(freq, res["start"], latest)) is None
-        else str(d),
+        next_calendar=None if nxt is None else str(nxt[1]),
+        next_reference=None if nxt is None else str(nxt[0]),
         frequency=freq, start=str(res["start"]), benchmark=bench,
         total=float(eq["portfolio"].iloc[-1] - 1),
-        decisions=[{k: p.get(k) for k in ("id", "effective", "kind", "priced_as_of", "note")}
-                   for p in profiles],
         series={"dates": [str(x) for x in eq["date"]],
                 "portfolio": [float(v) for v in eq["portfolio"]],
                 "benchmark": [float(v) for v in eq["benchmark"]]},
@@ -932,8 +1027,9 @@ def build(name: str, start: str | None = None, benchmark: str = "VNINDEX",
         f"benchmark:   {res['benchmark']}, PRICE index rebased to the start close\n"
         f"mandate:     rebalance {freq}; drift {drift}; breach {breach}; holdings "
         f"{res['holdings_range']['min']}-{res['holdings_range']['max']}\n"
-        f"             target held between calendar dates; breach clips to the cap\n"
-        f"             (D50, D51)\n"
+        f"             calendar on each period's last close, filled at the next open\n"
+        f"             (D67); target held between calendar dates; breach clips to\n"
+        f"             the cap (D50, D51)\n"
         f"constraints: {res['constraints']}\n"
         f"tactical:    {res['tactical']}\n"
         f"{dec}"

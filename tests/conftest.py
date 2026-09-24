@@ -86,7 +86,8 @@ TURNOVER = {"DDD": 0.01}            # % of float cap a day; every other name 0.5
 def make_db(root, jumps=(), fcap=None, bench_gap=None, opens=None, universe=None,
             regroup=None, fol=None):
     """market.db, group map and fol.csv under root. Flat prices (close_raw 1.0,
-    close_adj 1.0) at UNIVERSE's float caps.
+    close_adj 1.0) at UNIVERSE's float caps; open_raw is open_adj on the raw
+    scale (1.0 unless opens moves it).
     jumps = [(date, ticker, return)] applied to close_adj from that session on;
     fcap = {(from_date, ticker): cap} from that session on, None = no row (not
     trading); open_adj = close_adj unless opens = {(date, ticker): price};
@@ -108,11 +109,11 @@ def make_db(root, jumps=(), fcap=None, bench_gap=None, opens=None, universe=None
                     continue
                 o = (opens or {}).get((str(d.date()), t), level[t])
                 value = TURNOVER.get(t, 0.5) / 100 * f
-                rows.append((d.date(), t, 1.0, level[t], o, float(f), 2.0 * max(f, 1.0),
-                             2.0 * max(f, 1.0), value))
+                rows.append((d.date(), t, 1.0, level[t], o, o / level[t], float(f),
+                             2.0 * max(f, 1.0), 2.0 * max(f, 1.0), value))
     px = pd.DataFrame(rows, columns=["trade_date", "ticker", "close_raw", "close_adj",
-                                     "open_adj", "free_float", "outstanding_shares",
-                                     "market_cap", "value"])
+                                     "open_adj", "open_raw", "free_float",
+                                     "outstanding_shares", "market_cap", "value"])
     ix = pd.DataFrame([(d.date(), c, 1000.0 + i) for i, d in enumerate(SESSIONS)
                        for c in ("VNINDEX", "VN30") if not (c == "VN30" and d == bench_gap)],
                       columns=["trade_date", "code", "close"])

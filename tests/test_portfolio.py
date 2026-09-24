@@ -398,7 +398,7 @@ def test_statement_validation(patch, msg):
 
 
 @pytest.mark.parametrize("patch, msg", [
-    ({"liquidity": {"on": True}}, "unknown screen"),
+    ({"momentum": {"on": True}}, "unknown screen"),
     ({"fol": {"on": "yes"}}, "true or false"),
     ({"turnover": {"on": True, "min_pct": -1}}, "non-negative"),
     ({"float_cap": {"on": True, "min": 3}}, "unknown key"),

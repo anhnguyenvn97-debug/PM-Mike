@@ -35,8 +35,10 @@ recorded decision and the backtest replay all go through it. New listings
 never enter a book by themselves. A missing book.json is default_book: every
 group AV at 0 pp with all its names.
 
-Screen flags (D62), screen_flags(): the screens in screens.json that are on,
-evaluated on a params frame for the names given. A flag never removes a name.
+Screen flags (D62), screen_flags(): the name screens in screens.json that are
+on, evaluated on a params frame for the names given. A flag never removes a
+name. position_flags() (D70) evaluates the position screens on share counts,
+for a replication ticket (replicate.py); same row shape.
 
 new <name>
     Create the folder with a default statement.json, constraints.json (all off)
@@ -332,11 +334,56 @@ def screen_flags(frame: pd.DataFrame, tickers, screens: dict) -> list[dict]:
     return rows
 
 
+def position_flags(frame: pd.DataFrame, shares: dict, screens: dict) -> list[dict]:
+    """Position screens (D70) on {ticker: shares held} from the sizing
+    session's params frame, one row per (ticker, screen) flagged, the shape of
+    screen_flags with why "above" | "no data":
+
+        ownership  100 x shares / outstanding_shares  > max_pct_of_shares
+        float      100 x shares / free_float          > max_pct_of_float
+        liquidity  shares x close_raw / (participation_pct / 100 x adv_21)
+                   sessions                           > max_days
+
+    Tickers not in the frame and zero positions are skipped."""
+    p = frame.set_index("ticker") if "ticker" in frame.columns else frame
+    rows = []
+    own, flt, liq = screens["ownership"], screens["float"], screens["liquidity"]
+
+    def check(t, name, v, limit):
+        if v is None or pd.isna(v):
+            rows.append({"t": t, "screen": name, "value": None, "threshold": limit,
+                         "why": "no data"})
+        elif v > limit:
+            rows.append({"t": t, "screen": name, "value": float(v), "threshold": limit,
+                         "why": "above"})
+
+    for t in sorted(shares):
+        n = shares[t]
+        if n <= 0 or t not in p.index:
+            continue
+        if own["on"]:
+            out = p.at[t, "outstanding_shares"]
+            check(t, "ownership", 100 * n / out if out and out > 0 else None,
+                  own["max_pct_of_shares"])
+        if flt["on"]:
+            ff = p.at[t, "free_float"]
+            check(t, "float", 100 * n / ff if ff and ff > 0 else None, flt["max_pct_of_float"])
+        if liq["on"]:
+            adv = p.at[t, "adv_21"]
+            ok = adv is not None and not pd.isna(adv) and adv > 0
+            check(t, "liquidity",
+                  n * float(p.at[t, "close_raw"]) / (liq["participation_pct"] / 100 * adv)
+                  if ok else None, liq["max_days"])
+    return rows
+
+
 def flag_text(f: dict) -> str:
-    unit = {"turnover": "%", "float_cap": " bn", "fol": "%"}[f["screen"]]
+    unit = {"turnover": "%", "float_cap": " bn", "fol": "%", "ownership": "% of shares",
+            "float": "% of float", "liquidity": " sessions"}[f["screen"]]
     if f["why"] == "no data":
         return f"{f['screen']} no data"
-    return f"{f['screen']} {f['value']:.4g}{unit} < {f['threshold']:g}{unit}"
+    sign = ">" if f["why"] == "above" else "<"
+    return f"{f['screen']} {f['value']:.4g}{unit} {sign} {f['threshold']:g}{unit}"
 
 
 def screen(name: str, as_of=None, portfolio: Path = PORTFOLIO, db: Path = DB) -> list[dict]:

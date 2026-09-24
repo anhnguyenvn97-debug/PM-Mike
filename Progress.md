@@ -5,6 +5,106 @@ left) and `HANDOFF.md` (the pre-rebuild system, now reference only).
 
 ---
 
+## 2026-09-24 — Desk fixes after the first Replication review
+
+- "Build ticket did nothing": two desk servers were bound to :5000 (a stale
+  2026-09-22 one without the replicate route); Windows lets both bind and they
+  split the requests. `app.py` now refuses to start on a port that answers.
+- Order ticket: columns reordered (order | position screens | name screens,
+  with a rule between the blocks); every decimal at 2 places, cards included;
+  a flagged value is red text, not a pill.
+- Step buttons: the "Setup n / Loop n" line removed; "optional" sits by the
+  Decisions title.
+
+## 2026-09-24 — D68: derived calendar rows in the Decisions log (Step 18 B)
+
+- `backtest_engine.timeline(name)`: recorded decisions plus every calendar
+  rebalance of the forward test, in session order, each with source
+  (recorded | derived), also (calendar when a recorded decision took a period
+  boundary's place), unattainable, status, session. Derived entries carry the
+  decision they derive from, its setup_hash, fill, turnover and the standing
+  target's holdings. Derived on read, never written, never fed back into run().
+- GET /api/p/<name>/decisions returns it as "timeline". The Decisions tab
+  loads it on entry: derived rows quieter with a `calendar · auto` pill and a
+  panel of the derived target by group; recorded pills from source and also
+  (`inception + calendar`, `period`, `active`), `unattainable` where it applies.
+- finance_advance (gate): inception 2026-08-01 (also calendar: its session
+  07-31 is July's last), period 2026-08-15, derived 2026-08-28 filling 09-03.
+- Desk walk-through on a scratch copy of portfolio/ (port 5057): Replication
+  (energy_focus 100bn, finance_advance 20,000bn with red liquidity flags),
+  Decisions with the derived row and its panel, Monitor with the next
+  calendar trade 10-01 on the 09-30 close, Target's `unattainable` note on
+  the last session and the picker capped there. No console errors; live
+  portfolio/ untouched.
+- Tests: 4 engine + 1 app (186 pass); ruff and node --check clean.
+
+## 2026-09-24 — D69, D70: replication (Step 18 C)
+
+- `backtest_engine.forward()`: the forward test from inception at the next
+  open with the per-session trace; `monitor()` and replication both read it
+  (the one source of the target in force on a session).
+- `scr/replicate.py` (new): `reference()` = the standing target at the close
+  before the execution session (first session on or after the date; after
+  the last session: unattainable, no ticket; at or before the inception's
+  session: FAIL), with source recorded | derived and the unattainable
+  decisions named; `allocate()` = floor + largest remainder in lots of
+  `common.LOT` (100), pure; `run()` = the ticket, sized on the reference
+  close, the execution open reported beside it with the spend and cash
+  there, every screen measure per line, name and position flags. CLI prints
+  it. Writes nothing.
+- Position screens (D70) in `screens.json` (`ownership`, `float`,
+  `liquidity`), on by default at 5% / 15% / 20 sessions at 50%;
+  `portfolio.position_flags` beside `screen_flags`, why "above"; a file
+  without them reads the defaults. `monitor()` lists only the name screens as
+  on. The Monitor's save now sends the whole file (it would have reset the
+  position screens).
+- `common.snap_fwd` not added: replication snaps on the engine's sessions it
+  already holds, so it would have had no caller.
+- Desk: Replication in the rail after the portfolios. Inputs (portfolio, AUM
+  VND, cash %, execution date capped at the last session), figures (target in
+  force with calendar · auto or its trigger, fill, cash at the close and at
+  the open, invested, holdings vs range, group drift, flag count), the ticket
+  with every screen measure (red when flagged, amber on no data, "off" in the
+  header when a screen is off) and the position-screen form. POST
+  /api/p/<name>/replicate. Test fixture gains `open_raw`.
+- finance_advance, 100bn, 5% cash, last session: fill 09-21 open, sized on the
+  09-18 close, target derived 08-28 (calendar); spend 94.988bn, cash 5.012%
+  (3.992% at the open), 8 holdings, group drift 0.018 pp, one flag (ACB
+  turnover). Executing 2026-08-20 uses the 08-14 decision (the user's
+  "decide 15 Aug, track from 20 Aug" case).
+- Tests: `test_replicate.py` (27) and 2 app tests (181 pass).
+
+## 2026-09-24 — D67: one rebalance timing rule (Step 18 A)
+
+Spec: `docs/plan_v3.md`.
+
+- `simulate()`: the calendar fires on each period's LAST session
+  (`keys[i+1] != keys[i]`) and fills at the next period's first open, like a
+  decision. The last session in the data never fires. The D64 collision block
+  is one test: a decision (or inception) on a period's last session is that
+  rebalance, `also = calendar`; at lag 2+ a decision in flight on it is marked
+  the same. The "filled at the boundary's open" case is gone.
+- Attainability (`backtest_engine.unattainable`): a decision priced on the last
+  session, or effective after it, is `unattainable`, reported and not applied
+  (replaces "after the history" / "not reached" for these). `monitor()` holds
+  the last attainable decision, lists every decision with `unattainable`
+  (None or why), always runs at lag 1, and returns `next_reference` beside
+  `next_calendar`; "too recent to monitor" is gone. The window minimum is lag
+  + 1 sessions (was lag + 2), so an inception on the second-to-last session
+  runs.
+- `lag_sessions` pinned to 1: another value WARNs in `run()` (put there, not in
+  `validate_backtest_config`, which has no message channel); the desk no
+  longer offers the field.
+- Desk: Target date picker stops at the last session and shows `unattainable`
+  beside Record; Decisions list pills unattainable rows; Monitor shows them and
+  the reference close of the next calendar rebalance; Backtest caveat rewritten.
+- Numbers (scratch baseline before/after, start at inception):
+  finance_advance replay +5.8538% -> +5.7186%, mechanical +6.1988% ->
+  +6.1581%; the calendar fill derived 2026-09-03 / traded 09-04 is now derived
+  08-28 / traded 09-03. energy_focus mechanical from the history start
+  +10.4954% -> +10.8864%, 8/2/0 both.
+- Tests: 12 rebaselined to the new dates, 7 added (152 pass).
+
 ## 2026-09-22 — Edit group map button
 
 - Market data, Universe panel: "Edit group map" (POST /api/open/group_map)

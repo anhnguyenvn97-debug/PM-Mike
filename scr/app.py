@@ -7,7 +7,8 @@ and returns what it printed. The UI writes only desk-owned files:
     statement.json          Statement and Rebalancing steps, validate_statement first
     constraints.json        Constraints step, validate_constraints first
     book.json               Allocation step, portfolio.write_book (group map checked)
-    screens.json            Monitor step, validate_screens first
+    screens.json            Monitor step (name screens) and Replication (position
+                            screens, D70), validate_screens first
     backtest_config.json    Backtest step, validate_backtest_config first
     decisions/              Target step Record (one per date), Decisions step Reset
 
@@ -31,8 +32,11 @@ page has unsaved book edits (dirty). GET /api/p/<name>/decisions, and
 against today's universe (portfolio.evaluate), the profile as recorded
 ("groups", "tactical", "holdings", "flags") and "setup_differs" (its
 setup_hash is not today's, D61); "head_matches_book" says whether book.json
-equals the latest profile (null without one). POST /reset archives the log
-(portfolio.reset). GET /monitor is backtest_engine.monitor (D63).
+equals the latest profile (null without one). GET /api/p/<name>/decisions
+also returns "timeline" (backtest_engine.timeline, D68): the recorded
+decisions and the calendar rebalances derived from them, derived on read.
+POST /reset archives the log (portfolio.reset). GET /monitor is
+backtest_engine.monitor (D63).
 
 Writes are atomic (temp file, then rename). Every save may carry the "version"
 (mtime and size fingerprint) of the file it rewrites, as /api/p/<name> served
@@ -57,6 +61,13 @@ returns curves, statistics per benchmark, the rebalance log and end holdings.
 It replays decisions/ when there are any, unless the body says "mechanical":
 true. PUT /backtest_config saves backtest_config.json (version-checked).
 
+Replication (D69, D70), the third section: POST /api/p/<name>/replicate {aum,
+cash_pct, exec_date} is replicate.run (nothing written): the ticket that
+builds the target in force from cash at the execution session's open, sized
+on the close before it, with the name and position screen flags. An
+execution date after the last session returns "unattainable" and no lines.
+The position thresholds save through PUT /screens with the whole file.
+
 Book spec, as the page sends it:
 
     {"groups":   {"<group>": {"rating": "OW2", "pp": 4.5,
@@ -70,7 +81,9 @@ must belong to their group in the group map (tactical: any mapped ticker), and
 a stock sits in at most one tactical group.
 
 Bound to 127.0.0.1 only. Mutations need a JSON body and a local Host header,
-so a web page elsewhere cannot drive the app.
+so a web page elsewhere cannot drive the app. A port something already answers
+on is refused at start: Windows lets a second server bind it too, and the two
+then split the requests (a stale desk would serve old routes).
 
 Usage
     .venv\\Scripts\\python.exe scr\\app.py            http://127.0.0.1:5000
@@ -88,6 +101,7 @@ import duckdb
 import ingest
 import pandas as pd
 import params as params_mod
+import replicate
 import target
 from common import (
     BOOK,
@@ -632,9 +646,11 @@ def get_decisions(name):
             cols = (params_mod.universe(params_mod.at(app.config["DB"]))
                     if db_path() is not None else None)
             spec = pf.read_book(home)
+            tl = (backtest_engine.timeline(name, app.config["PORTFOLIO"], app.config["DB"])
+                  if db_path() is not None else [])
             return jsonify(ok=True, decisions=decisions_json(home, profiles, cols),
-                           head_matches_book=head_matches(spec, profiles))
-        except (BookError, OSError) as e:
+                           head_matches_book=head_matches(spec, profiles), timeline=tl)
+        except (BookError, ValueError, OSError) as e:
             return jsonify(ok=False, error=str(e))
 
 
@@ -699,6 +715,21 @@ def monitor(name):
     return jsonify(ok=True, **res)
 
 
+@app.post("/api/p/<name>/replicate")
+def replicate_ticket(name):
+    home_of(name)
+    b = body()
+
+    def calc():
+        return replicate.run(name, b.get("aum"), b.get("cash_pct", 0),
+                             date_arg(b.get("exec_date"), "execution date"),
+                             app.config["PORTFOLIO"], app.config["DB"])
+    ok, log, res = run(calc)
+    if not ok:
+        return jsonify(ok=False, error=log.removeprefix("FAIL  ").strip())
+    return jsonify(ok=True, **res)
+
+
 @app.get("/api/p/<name>/backtest")
 def get_backtest(name):
     home = home_of(name)
@@ -753,6 +784,12 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=5000)
     a = ap.parse_args(argv)
+    import socket
+    with socket.socket() as s:
+        if s.connect_ex(("127.0.0.1", a.port)) == 0:
+            print(f"FAIL  port {a.port} is already in use (another desk running?); "
+                  f"stop it or pass --port", file=sys.stderr)
+            return 1
     app.run(host="127.0.0.1", port=a.port, debug=False, threaded=True)
     return 0
 

@@ -162,6 +162,47 @@ def test_statement_constraints_screens_validated_before_write(root, client):
                                                                       "min_limit_pct": 30}
 
 
+def test_replicate_builds_a_ticket_and_writes_nothing(root, client):
+    home = make(root, rebalance={"frequency": "1M", "drift_threshold": None})
+    r = client.post("/api/p/p/replicate", json={"aum": 10_000, "cash_pct": 5})
+    assert r.get_json()["ok"] is False and "no decision recorded" in r.get_json()["error"]
+    pf.record_decision(home, "2026-07-01", db=root / "m.db")
+    before = sorted((p.name, p.stat().st_mtime_ns) for p in home.rglob("*"))
+    t = client.post("/api/p/p/replicate", json={"aum": 10_000, "cash_pct": 5,
+                                                "exec_date": str(ANCHOR)}).get_json()
+    assert t["ok"] and (t["exec_session"], t["reference"], t["source"]) == (
+        "2026-09-11", "2026-09-10", "derived")
+    assert [x["shares"] for x in t["lines"]] == [3800, 1900, 1900, 1000, 900]
+    assert {f["screen"] for f in t["position_flags"]} == {"ownership", "float", "liquidity"}
+    assert sorted((p.name, p.stat().st_mtime_ns) for p in home.rglob("*")) == before
+    t = client.post("/api/p/p/replicate", json={"aum": 10_000, "exec_date": "2026-09-14"})
+    assert t.get_json()["ok"] and t.get_json()["unattainable"].startswith("execution date")
+    r = client.post("/api/p/p/replicate", json={"aum": -1, "cash_pct": 5})
+    assert r.get_json()["ok"] is False and "positive" in r.get_json()["error"]
+
+
+def test_decisions_route_returns_the_timeline(root, client):
+    home = make(root, rebalance={"frequency": "1M", "drift_threshold": None})
+    pf.record_decision(home, "2026-07-01", db=root / "m.db")
+    r = client.get("/api/p/p/decisions").get_json()
+    assert r["ok"] and len(r["decisions"]) == 1
+    assert [(t["id"], t["source"]) for t in r["timeline"]] == [
+        ("2026-07-01", "recorded"), ("2026-07-31", "derived"), ("2026-08-31", "derived")]
+    assert not (home / "decisions" / "2026-07-31.json").exists()
+
+
+def test_saving_name_screens_keeps_the_position_screens(root, client):
+    home = make(root)
+    v = client.get("/api/p/p").get_json()["versions"]["screens"]
+    sc = client.get("/api/p/p").get_json()["screens"]
+    sc["ownership"] = {"on": True, "max_pct_of_shares": 4.5}
+    r = client.put("/api/p/p/screens", json={"screens": sc, "version": v})
+    assert r.status_code == 200
+    saved = json.loads((home / "screens.json").read_text())
+    assert saved["ownership"] == {"on": True, "max_pct_of_shares": 4.5}
+    assert saved["liquidity"] == {"on": True, "participation_pct": 50, "max_days": 20}
+
+
 def test_lifecycle_new_and_delete(root, client):
     r = client.post("/api/p", json={"name": "q", "statement": None})
     assert r.status_code == 200

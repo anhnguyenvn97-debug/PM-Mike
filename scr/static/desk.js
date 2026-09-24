@@ -83,18 +83,23 @@ function mandateText(r){
   if (r.drift_threshold !== null && r.drift_threshold !== undefined) a.push(`drift > ${pct(r.drift_threshold,0)}`);
   return a.join(" or ") || "none";
 }
-const FLAGNAME = {turnover:"21-day turnover", float_cap:"float cap", fol:"foreign ownership limit"};
-/* a screen value in its unit: float cap in bn VND, turnover and FOL in % */
+const FLAGNAME = {turnover:"21-day turnover", float_cap:"float cap", fol:"foreign ownership limit",
+  ownership:"share of outstanding", float:"share of free float", liquidity:"days to liquidate"};
+/* a screen value in its unit: float cap in bn VND, days in sessions, the rest in % */
 const flagVal = (screen, v) => v === null || v === undefined ? "no data"
   : screen === "float_cap" ? `${Math.round(+v).toLocaleString("en-US")} bn VND`
-  : screen === "turnover" ? `${(+v).toFixed(3)}%` : `${(+v).toFixed(1)}%`;
+  : screen === "liquidity" ? `${(+v).toFixed(1)} sessions`
+  : screen === "turnover" ? `${(+v).toFixed(3)}%` : `${(+v).toFixed(ownOrFloat(screen) ? 2 : 1)}%`;
+const ownOrFloat = s => s === "ownership" || s === "float";
 const flagText = f => f.why === "no data" ? `${FLAGNAME[f.screen]}: no data`
-  : `${FLAGNAME[f.screen]} ${flagVal(f.screen, f.value)} below ${flagVal(f.screen, f.threshold)}`;
+  : `${FLAGNAME[f.screen]} ${flagVal(f.screen, f.value)} ${f.why === "above" ? "above" : "below"} ${flagVal(f.screen, f.threshold)}`;
 function go(page, port=null, step=0){
   S.page = page; S.step = step; S.confirmDel = null; S.confirmReset = false;
   if (port && port !== S.port){ S.port = port; S.P = null; S.preview = null; S.console.flow = null; }
+  if (page === "rep") REP.sc = null;        // screens.json may have changed on the Monitor
   render(); window.scrollTo({top:0});
   if (page === "flow" && !S.P) loadPortfolio();
+  if (page === "rep") repEnter();
   enterStep();
 }
 /* steps that fetch their own data when entered */
@@ -103,6 +108,16 @@ function enterStep(){
   const k = STEPS[S.step].k;
   if (k === "backtest") btEnsure(S.P.name);
   if (k === "monitor" && !S.P.mon && !S.P.monLoading) loadMonitor();
+  if (k === "decisions" && !S.P.tl && !S.P.tlLoading) loadTimeline();
+}
+/* the Decisions log with the calendar rebalances derived from it (D68) */
+async function loadTimeline(){
+  const P = S.P; P.tlLoading = true;
+  const r = await api("GET", `/api/p/${encodeURIComponent(P.name)}/decisions`);
+  P.tlLoading = false;
+  P.tl = r?.ok ? r.timeline : [];
+  P.tlErr = r?.ok ? null : r?.error;
+  if (S.P === P) render();
 }
 async function refreshState(){ S.state = await api("GET", "/api/state"); }
 
@@ -260,7 +275,8 @@ function renderNav(){
     <div class="label">Workspace</div>
     <button data-go="data" aria-current="${S.page==="data"}">Market data ${last ? `<span class="pill ok plain num" style="font-size:11px">${last.slice(5)}</span>` : ""}</button>
     <button data-go="list" aria-current="${S.page==="list"||S.page==="new"}">Portfolios <span class="num" style="font-size:12px;color:var(--ink-3)">${names.length}</span></button>
-    ${names.map(n => `<button class="sub" data-port="${esc(n)}" aria-current="${S.page==="flow" && S.port===n}">${esc(short(n))}</button>`).join("")}`;
+    ${names.map(n => `<button class="sub" data-port="${esc(n)}" aria-current="${S.page==="flow" && S.port===n}">${esc(short(n))}</button>`).join("")}
+    <button data-go="rep" aria-current="${S.page==="rep"}">Replication</button>`;
   $("#railLatest").textContent = last ? `latest session ${last}` : "";
   $$("#nav [data-go]").forEach(b => b.onclick = () => go(b.dataset.go));
   $$("#nav [data-port]").forEach(b => b.onclick = () => go("flow", b.dataset.port, S.port===b.dataset.port ? S.step : STEP("allocation")));
@@ -444,6 +460,127 @@ function bindList(){
   });
 }
 
+/* ---------- page: replication (D69, D70) ----------
+   The ticket that builds a portfolio's target in force from cash at one open,
+   sized on the close before it (replicate.py). A view: nothing is written but
+   the position thresholds, which live in screens.json. */
+const REP = {name:null, aum:100e9, cash:5, exec:null, res:null, running:false, sc:null, ver:null, dirty:false};
+const POSROWS = [
+  ["ownership", "Ownership", "shares held ÷ outstanding shares", [["max_pct_of_shares", "% of shares", 0.5]]],
+  ["float", "Free float", "shares held ÷ free float shares", [["max_pct_of_float", "% of float", 1]]],
+  ["liquidity", "Days to liquidate", "position ÷ (participation × 21-day ADTV)", [["participation_pct", "% participation", 5], ["max_days", "sessions", 1]]]];
+function repEnter(){
+  const ps = S.state.portfolios;
+  if (!REP.name || !ps.some(p => p.name === REP.name)) REP.name = (ps.find(p => p.decisions) || ps[0])?.name || null;
+  if (!REP.exec) REP.exec = S.state.sessions.at(-1) || null;
+  if (REP.name && !REP.sc) repLoad();
+}
+async function repLoad(){
+  const name = REP.name;
+  REP.sc = null; REP.res = null; render();
+  const d = await api("GET", `/api/p/${encodeURIComponent(name)}`);
+  if (REP.name !== name) return;
+  REP.sc = d.screens; REP.ver = d.versions?.screens; REP.dirty = false;
+  render(); repRun();
+}
+async function repRun(){
+  if (!REP.name || REP.running) return;
+  const name = REP.name;
+  REP.running = true; render();
+  const res = await api("POST", `/api/p/${encodeURIComponent(name)}/replicate`,
+                        {aum:REP.aum, cash_pct:REP.cash, exec_date:REP.exec || null});
+  REP.running = false;
+  if (REP.name === name) REP.res = res;
+  render();
+}
+const vnd = v => v === null || v === undefined ? "—" : Math.round(v).toLocaleString("en-US");
+const bnv = v => v === null || v === undefined ? "—" : (v / 1e9).toLocaleString("en-US", {minimumFractionDigits:2, maximumFractionDigits:2});
+const dec2 = v => v.toLocaleString("en-US", {minimumFractionDigits:2, maximumFractionDigits:2});
+const REPFLAG = {ownership:"own_pct", float:"float_pct", liquidity:"liq_days", turnover:"turnover_pct", float_cap:"float_cap_bn", fol:"fol_pct"};
+/* one screen measure: red when its screen flags it, amber on no data, plain otherwise */
+function repCell(x, screen, fl, fmt, sep = false){
+  const f = fl[x.t + "|" + screen], v = x[REPFLAG[screen]], c = sep ? "n sep" : "n";
+  if (f && f.why === "no data") return `<td class="${c}"><span class="pill xs warn" title="${esc(flagText(f))}">no data</span></td>`;
+  if (v === null || v === undefined) return `<td class="${c}" style="color:var(--ink-3)">—</td>`;
+  return f ? `<td class="${c} negv" title="${esc(flagText(f))}">${fmt(v)}</td>` : `<td class="${c}">${fmt(v)}</td>`;
+}
+function repTicket(r){
+  if (!r) return `<p class="note">${REP.running ? "Building the ticket..." : "Set the inputs, then Build ticket."}</p>`;
+  if (!r.ok) return `<p class="note bad" style="white-space:pre-wrap">FAIL  ${esc(r.error)}</p>`;
+  if (r.unattainable) return `<p class="note warn"><span class="pill xs warn">unattainable</span> ${esc(r.unattainable)}. A ticket fills at an open the data holds, sized on the close before it: pick the last session or earlier.</p>`;
+  const t = r.totals, sc = r.screens, h = r.holdings_range;
+  const fl = {};
+  [...r.flags, ...r.position_flags].forEach(f => { fl[f.t + "|" + f.screen] = f; });
+  const nRed = [...r.flags, ...r.position_flags].filter(f => f.why !== "no data").length;
+  const on = k => sc[k].on ? "" : ' <span class="label">off</span>';
+  const floorOk = t.cash_pct >= r.cash_pct - 1e-9;
+  return `${r.messages.length ? `<div class="console">${logHtml(r.messages.join("\n"))}</div>` : ""}
+    <section class="panel">
+      <div class="bt-figs">
+        <div class="fig"><span class="label">Target in force</span><span class="big" style="font-size:18px">${esc(r.target_as_of)}</span><span class="sub">${r.source === "derived" ? "calendar · auto" : esc(r.trigger)} · decision ${esc(r.profile)}</span></div>
+        <div class="fig"><span class="label">Fill</span><span class="big" style="font-size:18px">${esc(r.exec_session)} open</span><span class="sub">sized on the ${esc(r.reference)} close</span></div>
+        <div class="fig"><span class="label">Cash at the close</span><span class="big ${floorOk ? "" : "negv"}">${t.cash_pct.toFixed(2)}%</span><span class="sub">floor ${r.cash_pct}% · ${bnv(t.cash)} bn VND</span></div>
+        <div class="fig"><span class="label">Cash at the open</span><span class="big ${t.cash_open_pct !== null && t.cash_open_pct < r.cash_pct ? "negv" : ""}">${t.cash_open_pct === null ? "—" : t.cash_open_pct.toFixed(2) + "%"}</span><span class="sub">${t.spend_open === null ? "no open for every name" : `spend ${bnv(t.spend_open)} bn at the open`}</span></div>
+      </div>
+      <div class="bt-figs" style="border-top:1px solid var(--line)">
+        <div class="fig"><span class="label">Invested</span><span class="big">${bnv(t.spend)}</span><span class="sub">bn VND of ${bnv(t.equity)} bn equity budget</span></div>
+        <div class="fig"><span class="label">Holdings</span><span class="big">${t.holdings}</span><span class="sub">${h && h.min ? `statement range ${h.min}–${h.max}` : ""} ${h && h.min ? rangePill(t.holdings, h) : ""}</span></div>
+        <div class="fig"><span class="label">Group drift</span><span class="big">${(t.group_drift * 100).toFixed(2)} pp</span><span class="sub">from lot rounding, vs the target</span></div>
+        <div class="fig"><span class="label">Screens</span><span class="big ${nRed ? "negv" : ""}">${nRed}</span><span class="sub">${nRed ? "flags to be aware of, in red" : "nothing flagged"}</span></div>
+      </div>
+    </section>
+    <section class="panel"><div class="panel-h"><h2>Order ticket <span class="num" style="color:var(--ink-3)">${r.lines.length}</span></h2><span class="label">buy from cash · board lot 100 · ${esc(r.name)}</span></div>
+      <div class="scroll"><table><thead><tr><th>Ticker</th><th>Group</th><th class="n">Weight</th><th class="n">Target</th><th class="n">Dev, bp</th><th class="n">Shares</th><th class="n">Value, bn</th><th class="n">Close</th><th class="n">Open</th>
+        <th class="n sep">% of shares${on("ownership")}</th><th class="n">% of float${on("float")}</th><th class="n">Days @ ${sc.liquidity.participation_pct}%${on("liquidity")}</th><th class="n sep">Turnover 21d${on("turnover")}</th><th class="n">Float cap, bn${on("float_cap")}</th><th class="n">FOL${on("fol")}</th></tr></thead><tbody>
+      ${r.lines.map(x => `<tr><td class="mono">${esc(x.t)}</td><td>${esc(x.group)}</td><td class="n">${pct(x.w)}</td><td class="n">${pct(x.target)}</td><td class="n ${Math.abs(x.dev_bp) >= 1 ? tone(x.dev_bp) : ""}">${x.dev_bp.toFixed(2)}</td><td class="n num">${x.shares ? vnd(x.shares) : '<span class="pill xs warn" title="below one lot at this AUM">0</span>'}</td><td class="n num">${bnv(x.value)}</td><td class="n num">${vnd(x.close)}</td><td class="n num">${vnd(x.open)}</td>
+        ${repCell(x, "ownership", fl, v => v.toFixed(2) + "%", true)}${repCell(x, "float", fl, v => v.toFixed(2) + "%")}${repCell(x, "liquidity", fl, dec2)}${repCell(x, "turnover", fl, v => dec2(v) + "%", true)}${repCell(x, "float_cap", fl, dec2)}${repCell(x, "fol", fl, v => dec2(v) + "%")}</tr>`).join("")}
+      </tbody></table></div>
+      <div class="panel-b"><span style="font-size:12.5px;color:var(--ink-3)">Weight and deviation are within the equity book (value ÷ spend). Red: a screen that is on flags the position; amber: no data. The name screens (turnover, float cap, FOL) are the Monitor's rules; the position screens are set below. Flags never trim a position.</span></div>
+    </section>`;
+}
+function repScreens(){
+  const sc = REP.sc;
+  if (!sc) return "";
+  const row = ([k, title, sub, fields]) => `<tr><td><b>${title}</b><div style="font-size:12px;color:var(--ink-3)">${sub}</div></td>
+    <td><label class="toggle"><input type="checkbox" data-pos-on="${k}" ${sc[k].on ? "checked" : ""} aria-label="${title} flag on"></label></td>
+    <td><div class="inline">${fields.map(([f, unit, step]) => `<input type="number" data-pos="${k}" data-f="${f}" step="${step}" min="0" value="${sc[k][f]}" style="width:90px"> <span class="mono">${unit}</span>`).join(" ")}</div></td></tr>`;
+  return `<section class="panel"><div class="panel-h"><h2>Position screens</h2><span class="label">screens.json · ${esc(REP.name)} · flags only</span></div>
+    <div class="scroll"><table><thead><tr><th>Screen</th><th>On</th><th>Flag when above</th></tr></thead><tbody>${POSROWS.map(row).join("")}</tbody></table></div>
+    <div class="panel-f"><span style="font-size:12.5px;color:var(--ink-3);margin-right:auto">${REP.dirty ? "unsaved; the ticket above uses the saved rules" : "These depend on the AUM, so only a ticket measures them."}</span><button class="btn primary" id="repScSave" ${REP.dirty ? "" : "disabled"}>Save position screens</button></div>
+    ${consoleBox("rep")}</section>`;
+}
+function renderRep(){
+  const ss = S.state.sessions, ps = S.state.portfolios;
+  const r = REP.res;
+  return `<div class="page wide">
+    <div class="head"><div><div class="crumbs">replicate.py · a view, written nowhere</div><h1>Replication</h1></div></div>
+    <p style="color:var(--ink-2);font-size:13.5px;max-width:880px">What a portfolio would hold if it were established from cash: the target in force at the close before the execution date, sized in board lots on that close, filled at the execution session's open.</p>
+    ${!ps.length ? `<p class="note">No portfolio yet.</p>` : `
+    <section class="panel"><div class="panel-b rep-ctl">
+      <div class="field"><label for="repName">Portfolio</label><select id="repName">${ps.map(p => `<option value="${esc(p.name)}" ${p.name === REP.name ? "selected" : ""}>${esc(p.name)}${p.decisions ? "" : " (no decision)"}</option>`).join("")}</select></div>
+      <div class="field"><label for="repAum">AUM, VND</label><input type="number" id="repAum" min="0" step="1000000000" value="${REP.aum}"><span class="hint">${bnv(REP.aum)} bn VND</span></div>
+      <div class="field"><label for="repCash">Cash, %</label><input type="number" id="repCash" min="0" max="99" step="0.5" value="${REP.cash}"><span class="hint">equity ${bnv(REP.aum * (1 - REP.cash / 100))} bn</span></div>
+      <div class="field"><label for="repExec">Execution date</label><input type="date" id="repExec" min="${ss[1] || ""}" max="${ss.at(-1) || ""}" value="${esc(REP.exec || "")}"><span class="hint">fills at the open; up to ${esc(ss.at(-1) || "")}</span></div>
+      <div class="field"><button type="button" class="btn primary" id="repRun" ${REP.running || !REP.name ? "disabled" : ""}>${REP.running ? "Building..." : "Build ticket"}</button></div>
+    </div></section>
+    ${repTicket(r)}
+    ${repScreens()}`}
+  </div>`;
+}
+function bindRep(){
+  if (!$("#repName")) return;
+  $("#repName").onchange = e => { REP.name = e.target.value; REP.sc = null; repEnter(); };
+  $("#repAum").onchange = e => { const v = parseFloat(e.target.value); if (isFinite(v) && v > 0) REP.aum = v; render(); };
+  $("#repCash").onchange = e => { const v = parseFloat(e.target.value); if (isFinite(v) && v >= 0 && v < 100) REP.cash = v; render(); };
+  $("#repExec").onchange = e => { REP.exec = e.target.value || null; render(); };
+  ["#repAum", "#repCash", "#repExec"].forEach(s => $(s).onkeydown = e => { if (e.key === "Enter"){ $(s).onchange(e); repRun(); } });
+  $("#repRun").onclick = repRun;
+  $$("[data-pos-on]").forEach(i => i.onchange = () => { REP.sc[i.dataset.posOn].on = i.checked; REP.dirty = true; render(); });
+  $$("[data-pos]").forEach(i => i.onchange = () => { const v = parseFloat(i.value); if (isFinite(v) && v >= 0){ REP.sc[i.dataset.pos][i.dataset.f] = v; REP.dirty = true; } render(); });
+  if ($("#repScSave")) $("#repScSave").onclick = () => action("rep", "PUT", `/api/p/${encodeURIComponent(REP.name)}/screens`,
+    {screens:REP.sc, version:REP.ver}, async res => { if (res.ok){ REP.ver = res.version; REP.dirty = false; if (S.P && S.P.name === REP.name) S.P = null; repRun(); } });
+}
+
 /* ---------- statement form ---------- */
 /* part: "new" (every field), "mandate" (Statement step), "rebalance" (Rebalancing step) */
 function statementForm(st, part){
@@ -525,7 +662,8 @@ function stepStatus(P, k){
     case "target": return !r ? "" : r.ok ? `${r.n} names · ${r.as_of}` : "blocked";
     case "backtest": return BT.name === P.name && BT.res ? `total ${spct(BT.res.benchmarks[BT.res.benchmark].stats.portfolio.total)}` : dec.length ? `replays ${dec.length}` : "book.json";
     case "monitor": { const m = P.mon; if (!m) return dec.length ? "" : "no decision"; if (!m.ok) return "error"; if (!m.decision) return "no decision";
-      return m.now ? `drift ${pct(m.now.drift, 1)}${m.now.breach ? " · breach" : ""}` : "too recent"; }
+      const un = (m.decisions || []).filter(d => d.unattainable).length;
+      return (m.now ? `drift ${pct(m.now.drift, 1)}${m.now.breach ? " · breach" : ""}` : "nothing in force") + (un ? ` · ${un} unattainable` : ""); }
     case "decisions": return dec.length ? `${dec.length} · last ${dec[dec.length-1].effective}` : "none";
   }
 }
@@ -570,7 +708,7 @@ function renderFlow(){
       <div class="inline"><button class="btn ghost" id="reload" title="Re-read the files on disk; unsaved edits stay in the page">Reload</button><button class="btn ghost" id="toList">All portfolios</button></div></div>
     ${P.errors.length ? `<p class="note bad">${P.errors.map(esc).join("<br>")}</p>` : ""}
     <nav class="steps" aria-label="Portfolio flow">${STEPS.map((s,i) => `<button data-step="${i}" class="blk-${s.blk.toLowerCase()}${i === STEP("allocation") ? " loop-start" : ""}${PAIR.has(s.k) && PAIR.has(k) && i !== S.step ? " pair" : ""}" aria-current="${i===S.step?"step":"false"}">
-      <span class="i">${s.blk} ${i+1}${s.opt?'<span class="opt">optional</span>':""}</span><span class="t">${s.t}</span><span class="s">${esc(stepStatus(P, s.k))}</span></button>`).join("")}</nav>
+      <span class="t">${s.t}${s.opt?'<span class="opt">optional</span>':""}</span><span class="s">${esc(stepStatus(P, s.k))}</span></button>`).join("")}</nav>
     ${dirty ? `<div class="dirtybar"><span>Unsaved edits in ${[P.dirty.book && "Allocation", P.dirty.cons && "Constraints"].filter(Boolean).join(" and ")}. The preview shows them; the files on disk do not have them yet.</span>
       <span class="inline"><button class="btn sm" id="discardAll">Discard</button><button class="btn sm primary" id="saveAll">Save</button></span></div>` : ""}
     <div class="${wide ? "flow-wide" : "flow"}">
@@ -720,7 +858,9 @@ function recordState(P){
   const exists = dec.some(d => d.effective === eff);
   const before = !isInc && eff && eff < inc;
   const label = exists ? `Replace decision for ${eff}` : kind === "inception" ? "Record inception" : `Record ${kind} rebalance`;
-  return {dec, eff, inc, isInc, kind, exists, before, label};
+  const last = S.state.sessions.at(-1) || "";
+  const unatt = !!eff && !!last && eff >= last;           // priced on the last session (D67)
+  return {dec, eff, inc, isInc, kind, exists, before, label, last, unatt};
 }
 function recordBox(P){
   const r = S.preview, s = recordState(P);
@@ -730,13 +870,14 @@ function recordBox(P){
   const head = P.d.head_matches_book;
   return `<div class="panel-b dec-log">
       <div class="dec-rec">
-        <div class="field"><label for="decEff">Effective date</label><input type="date" id="decEff" value="${esc(s.eff)}" min="${esc(S.state.sessions[0] || "")}"></div>
+        <div class="field"><label for="decEff">Effective date</label><input type="date" id="decEff" value="${esc(s.eff)}" min="${esc(S.state.sessions[0] || "")}" max="${esc(s.last)}"></div>
         <div class="field"><label>Kind</label>${s.isInc ? `<span class="pill dec kindpill" title="${s.dec.length ? "re-recording the inception date replaces it" : "the first decision of a portfolio"}">inception</span>`
           : `<div class="seg" role="group" aria-label="Kind of rebalance">${["period","active"].map(k => `<button type="button" data-kind="${k}" aria-pressed="${s.kind===k}" title="${k === "period" ? "the scheduled review of the period" : "a discretionary change inside the period"}">${k === "period" ? "Period" : "Active"}</button>`).join("")}</div>`}</div>
         <div class="field"><label for="decNote">Note</label><input type="text" id="decNote" value="${esc(P.decDraft.note)}" placeholder="why the allocation changed"></div>
         <div><button class="btn primary" id="decRec" ${blocked ? "disabled" : ""}>${esc(dirty ? "Save and " + s.label[0].toLowerCase() + s.label.slice(1) : s.label)}</button></div>
       </div>
       ${s.before ? `<p class="note bad">${esc(s.eff)} is before inception ${esc(s.inc)}. A later decision must be dated after it; Reset on the Decisions step to start a new inception.</p>` : ""}
+      ${s.unatt && !s.before ? `<p class="note warn"><span class="pill xs warn">unattainable</span> ${esc(s.eff)} is priced on ${esc(s.last)}, the last session in the data: its fill needs the next open, which is not in the data yet. Record still runs; the decision stays unapplied, and the one before it in force, until a drop adds the next session.</p>` : ""}
       ${r?.ok && r.requested && r.as_of !== r.requested ? `<span class="hint">Effective ${esc(r.requested)}, priced as of ${esc(r.as_of)}: the last session on or before it.</span>` : ""}
       <p class="note">Record builds target/ on the date's session and stores the allocation as saved, its holdings, the screen flags on them and a fingerprint of the setup in decisions/. One decision per date: recording a date again replaces it. ${head === false ? '<span class="pill xs warn">the saved allocation differs from the last decision</span>' : head ? '<span class="pill xs ok">the saved allocation matches the last decision</span>' : ""}</p>
     </div>`;
@@ -826,7 +967,7 @@ function monFigs(m, i=null){
     : now.threshold != null ? `trigger at ${pct(now.threshold, 0)}` : "drift trigger off";
   return `<div class="fig"><span class="label">Group drift</span><span class="big ${dr !== null && now.threshold != null && dr > now.threshold ? "negv" : ""}">${dr === null ? "cash" : pct(dr, 2)}</span><span class="sub">${dsub}</span></div>
     <div class="fig"><span class="label">Breach</span><span class="big ${dd.breach ? "negv" : ""}" style="font-size:18px">${dd.breach ? "yes" : "none"}</span><span class="sub">${dd.breach ? esc(dd.breach) : now.tolerance != null ? `tolerance ${pct(now.tolerance, 0)} of a cap` : "breach off"}</span></div>
-    <div class="fig"><span class="label">Next calendar date</span><span class="big" style="font-size:18px">${m.next_calendar ?? "none"}</span><span class="sub">${m.frequency ? `${FREQ[m.frequency]}; from the latest session` : "no schedule"}</span></div>
+    <div class="fig"><span class="label">Next calendar date</span><span class="big" style="font-size:18px">${m.next_calendar ?? "none"}</span><span class="sub">${m.frequency ? `${FREQ[m.frequency]}; trades that open on the ${esc(m.next_reference)} close` : "no schedule"}</span></div>
     <div class="fig"><span class="label">Since inception</span><span class="big ${tone(ret)}">${spct(ret)}</span><span class="sub">paper portfolio, from the ${esc(m.start)} close</span></div>`;
 }
 function monHold(m, i, byT){
@@ -845,10 +986,13 @@ function stepMonitor(P){
   else {
     const d = m.decision, fl = m.flags || [];
     const byT = fl.reduce((a, f) => ((a[f.t] ??= []).push(f), a), {});
+    const un = (m.decisions || []).filter(x => x.unattainable);
+    const unHtml = un.length ? `<div class="panel-b" style="padding-top:0">${un.map(x => `<p class="note warn"><span class="pill xs warn">unattainable</span> decision ${esc(x.id)} · ${esc(x.kind || "")}, effective ${esc(x.effective)}: ${esc(x.unattainable)}. It stays recorded and applies by itself once a drop adds the next session.</p>`).join("")}</div>` : "";
     const g = m.daily ? growthCharts(m.series.portfolio, m.series.benchmark, m.series.dates, m.rebalances, "mon", true) : null;
     if (g) MONC.cur = g.cur;
     body = `<section class="panel"><div class="panel-h"><h2>Monitor <span class="label" style="margin-left:6px">${esc(m.status)}</span></h2><button class="btn sm" id="monRefresh">Refresh</button></div>
-      <div class="panel-b" id="monKv">${m.daily ? monKv(m) : `<dl class="kv"><dt>Standing target</dt><dd>decision ${esc(d.id)} · ${esc(d.kind)}${d.priced_as_of ? ` · priced as of ${esc(d.priced_as_of)}` : ""}</dd><dt>Latest session</dt><dd>${esc(m.latest)}</dd></dl>`}</div>
+      <div class="panel-b" id="monKv">${m.daily ? monKv(m) : `<dl class="kv"><dt>Standing target</dt><dd>none in force</dd><dt>Latest session</dt><dd>${esc(m.latest)}</dd></dl>`}</div>
+      ${unHtml}
       ${m.daily ? `<div class="bt-figs" id="monFigs">${monFigs(m)}</div>` : ""}
       ${m.messages?.length ? `<div class="console">${logHtml(m.messages.join("\n"))}</div>` : ""}
     </section>
@@ -878,10 +1022,50 @@ function stepMonitor(P){
 const decDrops = r => !r ? "" : [Object.keys(r.dropped_names).length && `not trading today: ${Object.values(r.dropped_names).flat().join(", ")}`,
   Object.keys(r.lost_groups).length && `groups lost: ${Object.keys(r.lost_groups).join(", ")}`,
   r.appeared.length && `new groups, NO: ${r.appeared.join(", ")}`].filter(Boolean).join(" · ");
+/* the pill of a log row: built from source and also, never kind alone (D68) */
+const decPill = (x, t) => t?.source === "derived" ? '<span class="pill xs off" title="the calendar rebalance the engine derived from the decision in force; not stored">calendar · auto</span>'
+  : `<span class="pill xs ${x.kind === "inception" ? "dec" : x.kind === "active" ? "warn" : "info"}"${t?.also ? ' title="on a period\'s last session: this decision is that period\'s calendar rebalance"' : ""}>${esc(x.kind || "")}${t?.also ? " + calendar" : ""}</span>`
+    + (t?.unattainable ? ` <span class="pill xs warn" title="${esc(t.unattainable)}; applies once a drop adds the next session (D67)">unattainable</span>` : "");
+function derivedPanel(t, rec){
+  const gw = {}, names = {};
+  t.holdings.forEach(h => { gw[h.group] = (gw[h.group] || 0) + h.w; (names[h.group] ??= []).push(h); });
+  const groups = Object.keys(gw).sort((a, b) => gw[b] - gw[a]);
+  return `<section class="panel"><div class="panel-h"><h2>Calendar rebalance ${esc(t.effective)} <span class="label" style="margin-left:6px">calendar · auto</span></h2><span class="label">derived from decision ${esc(t.profile)}${rec ? ` · ${esc(rec.kind || "")}` : ""} · fills ${esc(t.fill)} open · turnover ${pct(t.turnover, 1)} · ${t.holdings.length} holdings</span></div>
+    <div class="panel-b" style="padding-bottom:0"><p class="note">Not stored. The engine re-derives the standing target on each period's last close from the decision in force (D67), so this row is recomputed on every load from today's group map, statement, constraints and decisions: it can read differently next month. Record a decision dated on ${esc(t.effective)} to replace it.</p></div>
+    <div class="scroll"><table><thead><tr><th>Group</th><th class="n">Weight</th><th class="n">Names</th><th>Holdings · target weight</th></tr></thead><tbody>
+      ${groups.map(g => `<tr><td>${esc(g)}</td><td class="n">${pct(gw[g], 1)}</td><td class="n">${names[g].length}</td><td class="mono" style="font-size:12px;color:var(--ink-2)">${names[g].sort((a, b) => b.w - a.w).map(h => `${esc(h.t)}<span style="color:var(--ink-3)"> ${pct(h.w, 1)}</span>`).join("  ")}</td></tr>`).join("")}
+    </tbody></table></div></section>`;
+}
 function stepDecisions(P){
   const log = (P.d.decisions || []).slice().reverse();
   if (!log.length) return `<section class="panel"><div class="panel-h"><h2>Decisions</h2></div><div class="panel-b"><p style="color:var(--ink-3);font-size:13px">No decision recorded. Record the inception on the Target step; until then the backtest holds book.json throughout.</p></div></section>`;
-  const d = log.find(x => x.id === P.decSel) || log[0];
+  const tl = P.tl ? P.tl.slice().reverse() : null;
+  const tById = Object.fromEntries((tl || []).filter(t => t.source === "recorded").map(t => [t.id, t]));
+  const rows = tl ? tl.map(t => t.source === "derived" ? {t, key:"cal:" + t.id} : {t, x:log.find(x => x.id === t.id), key:t.id}).filter(r => r.t.source === "derived" || r.x)
+    : log.map(x => ({x, key:x.id}));
+  const nDer = rows.filter(r => r.t?.source === "derived").length;
+  const selRow = rows.find(r => r.key === P.decSel) || rows.find(r => r.x) || rows[0];
+  if (selRow.t?.source === "derived") return decList(P, log, rows, selRow, nDer) + derivedPanel(selRow.t, log.find(x => x.id === selRow.t.profile));
+  const d = selRow.x;
+  return decList(P, log, rows, selRow, nDer) + decProfile(P, d, tById[d.id]);
+}
+function decList(P, log, rows, selRow, nDer){
+  const reset = S.confirmReset
+    ? `<span class="confirm">Move the ${log.length} decision${log.length > 1 ? "s" : ""} to decisions/archive/ and start a new inception? <button class="btn sm danger" id="resetYes">Reset</button><button class="btn sm" id="resetNo">Keep</button></span>`
+    : `<button class="btn sm" id="resetAsk" title="Archive every decision; the next Record is a new inception">Reset decisions</button>`;
+  const quiet = 'style="color:var(--ink-3)"';
+  return `<section class="panel"><div class="panel-h"><h2>Decisions <span class="num" style="color:var(--ink-3)">${log.length}${nDer ? ` + ${nDer} calendar` : ""}</span></h2><span class="inline"><span class="label">decisions/ · read-only${P.tl ? "" : P.tlErr ? " · calendar rows unavailable" : " · deriving calendar rows..."}</span>${reset}</span></div>
+    ${P.tlErr ? `<p class="note bad" style="margin:12px 16px 0;white-space:pre-wrap">${esc(P.tlErr)}</p>` : ""}
+    <div class="scroll"><table class="dec-list"><thead><tr><th>Effective</th><th>Kind</th><th>Priced as of</th><th>Recorded</th><th>Note</th><th>Setup</th><th>Against today's universe</th></tr></thead><tbody>
+      ${rows.map(r => { const t = r.t;
+        if (t?.source === "derived") return `<tr data-dec="${esc(r.key)}" aria-selected="${r === selRow}" ${quiet}><td class="mono">${esc(t.effective)}</td><td>${decPill(null, t)}</td><td class="mono">${esc(t.priced_as_of)}</td><td>derived</td><td>from ${esc(t.profile)} · fills ${esc(t.fill)}</td><td></td><td>recomputed on today's map</td></tr>`;
+        const x = r.x;
+        return `<tr data-dec="${esc(r.key)}" aria-selected="${r === selRow}"><td class="mono">${esc(x.effective)}</td><td>${decPill(x, t || {unattainable:x.effective >= (S.state.sessions.at(-1) || "9") ? "priced on the last session in the data" : null})}</td><td class="mono">${esc(x.priced_as_of || "")}</td><td class="mono">${esc(x.recorded_at || "")}</td><td>${esc(x.note || "")}</td><td>${x.setup_differs ? '<span class="pill xs warn" title="statement.json or constraints.json changed since this decision; replay uses today\'s">setup differs</span>' : x.setup_hash ? '<span class="pill xs ok">same</span>' : '<span class="pill xs off">not recorded</span>'}</td><td>${decDrops(x.report) ? '<span class="err">names or groups dropped</span>' : "as recorded"}</td></tr>`; }).join("")}
+    </tbody></table></div>
+    ${nDer ? `<div class="panel-b" style="padding-block:6px 10px"><span style="font-size:12px;color:var(--ink-3)">Calendar · auto rows are the rebalances the engine derives on each period's last close from the decision in force. They are recomputed on every load from today's group map and decisions and are never written; a decision recorded on that session replaces one.</span></div>` : ""}
+  </section>`;
+}
+function decProfile(P, d, t){
   const rated = Object.entries(d.groups).filter(([, s]) => (s.rating || "AV") !== "NO").sort(([a], [b]) => a.localeCompare(b));
   const no = Object.keys(d.groups).filter(g => d.groups[g].rating === "NO").sort();
   const tac = d.tactical?.groups || [];
@@ -890,14 +1074,7 @@ function stepDecisions(P){
   const byT = (d.flags || []).reduce((a, f) => ((a[f.t] ??= []).push(f), a), {});
   const gw = (d.holdings || []).reduce((a, h) => (a[h.group] = (a[h.group] || 0) + h.w, a), {});
   const row = (name, s, names, tag) => `<tr><td>${esc(name)}${tag}</td><td><span class="mono" style="color:var(--${side(s.rating || "AV")});font-weight:500">${esc(s.rating || "AV")}</span></td><td class="n">${fpp(s.pp || 0)}</td><td class="n">${gw[name] !== undefined ? pct(gw[name], 1) : "—"}</td><td class="n">${names.length}</td><td class="mono" style="font-size:12px;color:var(--ink-2)">${names.map(t => esc(t) + (w[t] !== undefined ? `<span style="color:var(--ink-3)"> ${pct(w[t], 1)}</span>` : "") + (byT[t] ? '<b class="flag-l" title="' + esc(byT[t].map(flagText).join("; ")) + '">!</b>' : "")).join("  ")}</td></tr>`;
-  const reset = S.confirmReset
-    ? `<span class="confirm">Move the ${log.length} decision${log.length > 1 ? "s" : ""} to decisions/archive/ and start a new inception? <button class="btn sm danger" id="resetYes">Reset</button><button class="btn sm" id="resetNo">Keep</button></span>`
-    : `<button class="btn sm" id="resetAsk" title="Archive every decision; the next Record is a new inception">Reset decisions</button>`;
-  return `<section class="panel"><div class="panel-h"><h2>Decisions <span class="num" style="color:var(--ink-3)">${log.length}</span></h2><span class="inline"><span class="label">decisions/log.csv · read-only</span>${reset}</span></div>
-    <div class="scroll"><table class="dec-list"><thead><tr><th>Effective</th><th>Kind</th><th>Priced as of</th><th>Recorded</th><th>Note</th><th>Setup</th><th>Against today's universe</th></tr></thead><tbody>
-      ${log.map(x => `<tr data-dec="${esc(x.id)}" aria-selected="${x.id === d.id}"><td class="mono">${esc(x.effective)}</td><td><span class="pill xs ${x.kind === "inception" ? "dec" : x.kind === "active" ? "warn" : "info"}">${esc(x.kind || "")}</span></td><td class="mono">${esc(x.priced_as_of || "")}</td><td class="mono">${esc(x.recorded_at || "")}</td><td>${esc(x.note || "")}</td><td>${x.setup_differs ? '<span class="pill xs warn" title="statement.json or constraints.json changed since this decision; replay uses today\'s">setup differs</span>' : x.setup_hash ? '<span class="pill xs ok">same</span>' : '<span class="pill xs off">not recorded</span>'}</td><td>${decDrops(x.report) ? '<span class="err">names or groups dropped</span>' : "as recorded"}</td></tr>`).join("")}
-    </tbody></table></div></section>
-  <section class="panel"><div class="panel-h"><h2>Profile ${esc(d.effective)} <span class="label" style="margin-left:6px">${esc(d.kind || "")}</span></h2><span class="label">recorded ${esc(d.recorded_at || "")}${d.priced_as_of ? ` · priced as of ${esc(d.priced_as_of)}` : ""}${d.holdings ? ` · ${d.holdings.length} holdings` : ""}</span></div>
+  return `<section class="panel"><div class="panel-h"><h2>Profile ${esc(d.effective)} <span style="margin-left:6px">${decPill(d, t)}</span></h2><span class="label">recorded ${esc(d.recorded_at || "")}${d.priced_as_of ? ` · priced as of ${esc(d.priced_as_of)}` : ""}${d.holdings ? ` · ${d.holdings.length} holdings` : ""}</span></div>
     ${d.note || drops ? `<div class="panel-b" style="padding-bottom:0">${d.note ? `<p>${esc(d.note)}</p>` : ""}${drops ? `<p class="note warn">Replayed on today's universe: ${esc(drops)}.</p>` : ""}</div>` : ""}
     <div class="scroll"><table><thead><tr><th>Group</th><th>Rating</th><th class="n">Active pp</th><th class="n">Weight</th><th class="n">Names</th><th>Investable${d.holdings ? " · weight as recorded" : ""}</th></tr></thead><tbody>
       ${rated.map(([g, s]) => row(g, s, s.investable || [], "")).join("")}
@@ -1138,7 +1315,7 @@ function bindFlow(){
     $("#scSave").onclick = () => {
       const v = (key, field) => ({on:$(`#sc_${key}`).checked, [field]:+$(`#sc_${key}_v`).value});
       action("flow", "PUT", `/api/p/${name}/screens`,
-        {screens:{turnover:v("turnover", "min_pct"), float_cap:v("float_cap", "min_bn_vnd"), fol:v("fol", "min_limit_pct")}, version:P.versions.screens},
+        {screens:{...P.screens, turnover:v("turnover", "min_pct"), float_cap:v("float_cap", "min_bn_vnd"), fol:v("fol", "min_limit_pct")}, version:P.versions.screens},
         async res => { if (res.ok){ await afterSave(); S.P.mon = null; loadMonitor(); } });
     };
   }
@@ -1158,7 +1335,7 @@ function bindFlow(){
    (the engine returns every benchmark; Sharpe is rescaled by rf). */
 const BT = {name:null, start:null, bench:"VNINDEX", replay:true, draft:null, saved:null, version:null,
             defaults:null, cfgErr:null, res:null, req:null, err:null, running:false, cur:null};
-const RUNKEYS = ["brokerage_bps", "sell_tax_bps", "lag_sessions"];
+const RUNKEYS = ["brokerage_bps", "sell_tax_bps"];
 const MON = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 const spct = (v, d=2) => (v >= 0 ? "+" : "−") + Math.abs(v*100).toFixed(d) + "%";
 const spp = (v, d=2) => (v >= 0 ? "+" : "−") + Math.abs(v*100).toFixed(d) + " pp";
@@ -1325,7 +1502,7 @@ function renderBacktest(P){
         ${kv("Turnover after inception, one-way", pct(bs.turnover, 1))}${kv("Trading costs, incl. inception", (bs.cost*1e4).toFixed(1) + " bps")}
         </tbody></table></div></section>
     </div>
-    <section class="panel"><div class="panel-h"><h2>Rebalance log</h2><span class="label">decision at the close · ${c.lag_sessions ? `fill at the open ${c.lag_sessions} session${c.lag_sessions === 1 ? "" : "s"} later` : "fill at the same close"}</span></div>
+    <section class="panel"><div class="panel-h"><h2>Rebalance log</h2><span class="label">decision at the close · ${c.lag_sessions === 1 ? "fill at the next open" : c.lag_sessions ? `fill at the open ${c.lag_sessions} sessions later (backtest_config.json what-if)` : "fill at the same close (backtest_config.json what-if)"}</span></div>
       <div class="scroll"><table><thead><tr><th>Decision</th><th>Fill</th><th>Trigger</th>${r.timeline ? "<th>Profile</th>" : ""}<th>Policy</th><th>Target as of</th><th class="n">Group drift</th><th class="n">Turnover</th><th class="n">Cost</th><th class="n">Holdings</th><th>Note</th></tr></thead><tbody>
       ${r.rebalances.map(e => `<tr><td class="mono">${e.decision}</td><td class="mono">${e.fill}</td>
         <td>${e.trigger === "drift" ? '<span class="pill warn">drift</span>' : e.trigger === "breach" ? `<span class="pill bad" title="a cap broken by more than ${pct(breachTol, 0)} of its limit; the fill clips it to the cap">breach</span>` : e.trigger === "calendar" ? '<span class="pill info">calendar</span>' : e.trigger === "decision" ? `<span class="pill dec" title="a recorded decision became the target${e.also ? "; also the calendar date" : ""}${e.deferred_from ? `; effective ${e.deferred_from}, deferred while a fill was pending` : ""}">decision${e.also ? " + calendar" : ""}</span>` : `<span class="pill off"${e.also ? ' title="also the calendar rebalance of this period"' : ""}>inception${e.also ? " + calendar" : ""}</span>`}</td>
@@ -1379,7 +1556,7 @@ function renderBacktest(P){
         ${BT.cfgErr ? `<p class="note bad" style="margin:12px 16px 0">${esc(BT.cfgErr)}. Showing defaults; Save replaces the file.</p>` : ""}
         <div class="panel-b bt-cfg">
           ${field("brokerage_bps", "Brokerage, bps per side", 1)}${field("sell_tax_bps", "Sell tax, bps", 1)}
-          ${field("lag_sessions", "Fill lag, sessions", 1, "0–5; fills at that session's open, 0 = same close")}${field("risk_free_rate", "Risk-free rate, % a year", 0.1, "Sharpe only; applies without a run")}
+          ${field("risk_free_rate", "Risk-free rate, % a year", 0.1, "Sharpe only; applies without a run")}
         </div>
         <div class="panel-f"><span class="label" style="margin-right:auto">${cfgDirty ? "unsaved" : "saved"}</span>
           <button class="btn" id="btReset" ${cfgDirty ? "" : "disabled"}>Revert</button>
@@ -1393,7 +1570,7 @@ function renderBacktest(P){
         <li><b>Today's universe, held backwards.</b> Every book is evaluated on the group map and listed names of the last session, applied to every past date: survivorship bias flatters every level. A name in a recorded book that no longer trades is dropped (listed in the Decision timeline). Read excess and spreads first.</li>
         <li><b>Recorded decisions are the standing targets.</b> With Replay on, the inception decision holds before its date; each later decision becomes the target from its effective date until the next one, and calendar, drift and breach rebalances trade to it. Statement and constraints are today's: a decision recorded under other settings shows "setup differs".</li>
         <li><b>Rebalances follow the mandate.</b> The standing target is derived at inception, on each decision and on each calendar date: the neutral from that session's free float × official close, plus the book's active pp, with the caps solved. It is held until the next one. Drift is measured against it and a drift fill trades back to it in full. A breach fill only clips the broken cap to its limit and spreads the excess inside the cap's scope by current weight; the rest of the book is untouched. An underweight larger than a past neutral holds the group at 0% (listed in the messages).</li>
-        <li><b>Fills at the open.</b> A rebalance is decided at a close and trades at the open of the session the fill lag points to: the held book earns the overnight gap, the new book earns the day. At lag 1 every close is checked; at lag 2 or more the sessions in between are not, while the trade is in flight. The benchmark counts from the start close and the portfolio is cash until the first fill.</li>
+        <li><b>One timing rule.</b> Every rebalance references a close and trades at the next session's open: a decision its effective date's session, a calendar rebalance its period's last session. The held book earns the overnight gap, the new book earns the day. A decision priced on the last session in the data cannot fill yet and is not applied (unattainable) until a drop adds the next session. The benchmark counts from the start close and the portfolio is cash until the first fill.</li>
       </ul></div></section>`;
 }
 function bindBacktest(){
@@ -1410,7 +1587,6 @@ function bindBacktest(){
   $$("[data-cfg]").forEach(i => i.onchange = () => {
     const k = i.dataset.cfg; let v = parseFloat(i.value);
     if (!isFinite(v) || v < 0){ render(); return; }
-    if (k === "lag_sessions") v = Math.min(5, Math.round(v));
     if (k === "risk_free_rate") v = Math.min(0.99, v / 100);
     BT.draft[k] = v; render();
   });
@@ -1437,6 +1613,7 @@ function render(){
   if (S.page === "data"){ m.innerHTML = renderData(); bindData(); }
   else if (S.page === "list"){ m.innerHTML = renderList(); bindList(); }
   else if (S.page === "new"){ m.innerHTML = renderNew(); bindNew(); }
+  else if (S.page === "rep"){ m.innerHTML = renderRep(); bindRep(); }
   else { m.innerHTML = renderFlow(); bindFlow(); }
   m.classList.toggle("busy", S.busy);
   if (keep){
